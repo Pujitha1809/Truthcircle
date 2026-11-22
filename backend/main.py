@@ -35,12 +35,17 @@ from models import (
     VerifyResponse,
     ChatMessage,
     RoomInfo,
-    CredibilityCard
+    CredibilityCard,
+    SpamPrediction,
+    CreateRoomRequest,
+    JoinRoomRequest
 )
 from cache_store import cache_store
 from services.serp_service import serp_service
 from services.you_service import you_service
 from services.orchestrator import orchestrator
+from spam_detector import predict_spam
+import random
 
 app = FastAPI(
     title="TruthCircle Backend API",
@@ -87,43 +92,18 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Pre-seeded Room Data for Realistic Demo
-ROOMS_CATALOG: Dict[str, RoomInfo] = {
-    "family-circle": RoomInfo(
-        id="family-circle",
-        name="Family Circle 🇮🇳",
-        description="Sharma Family & Relatives • TruthCircle Protected",
-        unread_count=2,
-        avatar="👨‍👩‍👧‍👦",
-        members=["Maa", "Rohan", "Uncle Vijay", "Chachi Suman", "TruthCircle Bot"],
-        is_protected=True
-    ),
-    "mumbai-commuters": RoomInfo(
-        id="mumbai-commuters",
-        name="Mumbai Commuters & News 🚆",
-        description="Local trains, monsoon alerts & traffic verification",
-        unread_count=0,
-        avatar="🚆",
-        members=["Admin Rahul", "Pooja", "Vikram", "TruthCircle Bot"],
-        is_protected=True
-    ),
-    "brand-watch": RoomInfo(
-        id="brand-watch",
-        name="Enterprise Brand Watch 🛡️",
-        description="Corporate reputation, fake coupon & PR monitoring",
-        unread_count=1,
-        avatar="🛡️",
-        members=["Security Lead", "PR Director", "Rohan", "TruthCircle Bot"],
-        is_protected=True
-    )
-}
+# Dynamic rooms dictionary: indexed by invite_code (TC-XXXX)
+ROOMS_CATALOG: Dict[str, RoomInfo] = {}
 
-# In-memory session message store — starts 100% blank
-room_messages: Dict[str, List[dict]] = {
-    "family-circle": [],
-    "mumbai-commuters": [],
-    "brand-watch": []
-}
+# In-memory session message store — indexed by invite_code
+room_messages: Dict[str, List[dict]] = {}
+
+def generate_invite_code() -> str:
+    while True:
+        digits = random.randint(1000, 9999)
+        code = f"TC-{digits}"
+        if code not in ROOMS_CATALOG:
+            return code
 
 @app.get("/api/health")
 async def health_check():
@@ -189,18 +169,82 @@ async def get_verification_history():
 async def get_rooms():
     return list(ROOMS_CATALOG.values())
 
-@app.post("/api/rooms")
-async def create_room(room: RoomInfo):
-    """Creates a new room dynamically and initializes an empty message log."""
-    ROOMS_CATALOG[room.id] = room
-    room_messages[room.id] = []
+@app.post("/api/rooms/create")
+async def create_room_with_code(req: CreateRoomRequest):
+    """Creates a new dynamic group room with a unique 6-character invite code (TC-XXXX)."""
+    code = generate_invite_code()
+    members = [req.creator_name.strip(), "TruthCircle Bot"]
+    room = RoomInfo(
+        id=code,
+        name=req.group_name.strip(),
+        description=f"Created by {req.creator_name} • Code: {code}",
+        invite_code=code,
+        unread_count=0,
+        avatar="💬",
+        members=members,
+        is_protected=True
+    )
+    ROOMS_CATALOG[code] = room
+    room_messages[code] = []
     return room
+
+@app.post("/api/rooms/join")
+async def join_room_with_code(req: JoinRoomRequest):
+    """Validates unique invite code and adds user to the room."""
+    code = req.invite_code.strip().upper()
+    if code not in ROOMS_CATALOG:
+        # Check case-insensitive match
+        matched_code = next((k for k in ROOMS_CATALOG.keys() if k.upper() == code), None)
+        if not matched_code:
+            raise HTTPException(status_code=404, detail=f"Room with code '{code}' not found")
+        code = matched_code
+
+    room = ROOMS_CATALOG[code]
+    uname = req.user_name.strip()
+    if uname and uname not in room.members:
+        room.members.append(uname)
+
+    # Broadcast USER_JOINED system notice to WebSocket
+    join_msg = {
+        "id": f"msg-sys-{Date_now_ms() if 'Date_now_ms' in locals() else datetime.now().timestamp()}",
+        "room_id": code,
+        "sender_id": "truthcircle-bot",
+        "sender_name": "TruthCircle AI",
+        "sender_avatar": "🛡️",
+        "text": f"👋 {uname} joined the group via code {code}.",
+        "timestamp": datetime.now().strftime("%I:%M %p"),
+        "is_forwarded": False,
+        "card": None
+    }
+    if code in room_messages:
+        room_messages[code].append(join_msg)
+    await manager.broadcast_to_room(code, {
+        "type": "NEW_MESSAGE",
+        "message": join_msg
+    })
+
+    return room
+
+@app.get("/api/rooms/{invite_code}")
+async def get_room_by_code(invite_code: str):
+    code = invite_code.strip().upper()
+    matched_code = next((k for k in ROOMS_CATALOG.keys() if k.upper() == code), None)
+    if not matched_code:
+        raise HTTPException(status_code=404, detail="Room not found")
+    return {
+        "room": ROOMS_CATALOG[matched_code],
+        "messages": room_messages.get(matched_code, [])
+    }
 
 @app.get("/api/rooms/{room_id}/messages")
 async def get_room_messages(room_id: str):
-    if room_id not in room_messages:
-        room_messages[room_id] = []
-    return room_messages[room_id]
+    code = room_id.strip().upper()
+    matched = next((k for k in room_messages.keys() if k.upper() == code), None)
+    if matched:
+        return room_messages[matched]
+    if room_id in room_messages:
+        return room_messages[room_id]
+    return []
 
 @app.post("/api/verify", response_model=VerifyResponse)
 async def verify_claim(req: VerifyRequest):
@@ -281,11 +325,18 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, user_id: str):
 
                 if action == "SEND_MESSAGE":
                     msg_data = payload.get("message", {})
+                    text = msg_data.get("text", "")
+                    
+                    # ─── Real-Time Spam & Scam Prediction (<15ms) ───────────
+                    # Run deterministic + heuristic analysis on every incoming message
+                    spam_result = predict_spam(text)
+                    msg_data["spam_prediction"] = spam_result
+
                     if room_id not in room_messages:
                         room_messages[room_id] = []
                     room_messages[room_id].append(msg_data)
 
-                    # Broadcast the user message to everyone in the room
+                    # Broadcast the user message with spam prediction to everyone in the room
                     await manager.broadcast_to_room(room_id, {
                         "type": "NEW_MESSAGE",
                         "message": msg_data

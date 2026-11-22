@@ -60,6 +60,32 @@ export async function fetchRooms() {
   }
 }
 
+export async function createRoomWithCode({ groupName, creatorName }) {
+  const res = await fetch(`${API_BASE}/api/rooms/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_name: groupName, creator_name: creatorName })
+  });
+  if (!res.ok) throw new Error('Create room failed');
+  return await res.json();
+}
+
+export async function joinRoomWithCode({ inviteCode, userName }) {
+  const res = await fetch(`${API_BASE}/api/rooms/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ invite_code: inviteCode, user_name: userName })
+  });
+  if (!res.ok) throw new Error('Join room failed');
+  return await res.json();
+}
+
+export async function fetchRoomByCode(inviteCode) {
+  const res = await fetch(`${API_BASE}/api/rooms/${inviteCode}`);
+  if (!res.ok) throw new Error('Fetch room by code failed');
+  return await res.json();
+}
+
 export async function createRoom(roomData) {
   try {
     const res = await fetch(`${API_BASE}/api/rooms`, {

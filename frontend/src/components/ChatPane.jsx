@@ -14,7 +14,10 @@ import {
   Reply,
   X,
   Image as ImageIcon,
-  Loader2
+  Loader2,
+  AlertTriangle,
+  Copy,
+  Check
 } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
 import CredibilityCard from './CredibilityCard';
@@ -257,6 +260,21 @@ export default function ChatPane({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-bold text-slate-100">{room.name}</h2>
+              {room.invite_code && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (navigator.clipboard) {
+                      navigator.clipboard.writeText(room.invite_code);
+                    }
+                  }}
+                  className="flex items-center gap-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-mono font-bold transition-all"
+                  title="Click to copy invite code"
+                >
+                  <span>Code: {room.invite_code}</span>
+                  <Copy className="w-2.5 h-2.5" />
+                </button>
+              )}
               {isSplitView && (
                 <span className="rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 px-1.5 py-0.5 text-[10px] font-mono font-bold">
                   View: {currentUser.name}
@@ -395,6 +413,47 @@ export default function ChatPane({
                           : part
                       )}
                     </p>
+                  )}
+
+                  {/* Automatic Real-Time Spam & Scam Prediction Alert Banner */}
+                  {!isBot && msg.spam_prediction && msg.spam_prediction.is_spam && (
+                    <div className="mt-2.5 p-2.5 rounded-xl bg-gradient-to-r from-red-950/80 via-red-900/50 to-red-950/80 border border-red-500/50 text-red-200 text-xs shadow-md animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="flex items-center gap-1.5 font-bold text-red-300">
+                          <AlertTriangle className="w-4 h-4 text-red-400 animate-pulse shrink-0" />
+                          <span>🚨 SPAM / SCAM ALERT ({msg.spam_prediction.spam_score}% Risk)</span>
+                        </div>
+                        <span className="font-mono text-[10px] uppercase px-1.5 py-0.2 rounded bg-red-950 text-red-400 border border-red-800">
+                          {msg.spam_prediction.spam_category}
+                        </span>
+                      </div>
+
+                      {/* Triggers list */}
+                      {msg.spam_prediction.triggers && msg.spam_prediction.triggers.length > 0 && (
+                        <div className="text-[11px] text-red-300/90 space-y-0.5 my-1.5 bg-black/40 p-1.5 rounded border border-red-900/40">
+                          <span className="font-semibold text-[10px] uppercase text-red-400 block mb-0.5">Detected Red Flags:</span>
+                          {msg.spam_prediction.triggers.map((trig, tIdx) => (
+                            <div key={tIdx} className="flex items-center gap-1.5">
+                              <span className="w-1 h-1 rounded-full bg-red-400"></span>
+                              <span>{trig}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* One-Click Deep Verify Button */}
+                      <div className="mt-2 flex items-center justify-between pt-1 border-t border-red-800/40">
+                        <span className="text-[10px] text-red-400/80">Instant heuristic classifier alert</span>
+                        <button
+                          type="button"
+                          onClick={() => onTruthCircleVerify(msg.text)}
+                          className="flex items-center gap-1 bg-red-600 hover:bg-red-500 text-white font-bold text-[10px] px-2.5 py-1 rounded-md shadow transition-all active:scale-95"
+                        >
+                          <Search className="w-3 h-3" />
+                          <span>🔍 Deep-Verify with @truthcircle</span>
+                        </button>
+                      </div>
+                    </div>
                   )}
 
                   {/* Hover action bar: Reply + Fact-Check */}

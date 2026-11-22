@@ -71,6 +71,12 @@ class VerifyResponse(BaseModel):
     processing_time_ms: int
     cached: bool
 
+class SpamPrediction(BaseModel):
+    is_spam: bool = False
+    spam_score: int = 0
+    spam_category: str = "safe"
+    triggers: List[str] = Field(default_factory=list)
+
 class ChatMessage(BaseModel):
     id: str
     room_id: str
@@ -84,11 +90,21 @@ class ChatMessage(BaseModel):
     image_url: Optional[str] = None
     reply_to: Optional[str] = None
     card: Optional[CredibilityCard] = None
+    spam_prediction: Optional[SpamPrediction] = None
+
+class CreateRoomRequest(BaseModel):
+    group_name: str
+    creator_name: str
+
+class JoinRoomRequest(BaseModel):
+    invite_code: str
+    user_name: str
 
 class RoomInfo(BaseModel):
     id: str
     name: str
     description: str
+    invite_code: str
     unread_count: int = 0
     avatar: str
     members: List[str]

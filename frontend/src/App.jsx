@@ -17,12 +17,17 @@ import DemoControlBar from './components/DemoControlBar';
 import ChatPane from './components/ChatPane';
 import EvidenceDrawer from './components/EvidenceDrawer';
 import RadarModal from './components/RadarModal';
-import { fetchHealth, fetchPresets, fetchRooms, fetchRoomMessages, verifyClaim, fetchHistory, createRoom } from './services/api';
+import RoomLobby from './components/RoomLobby';
+import { fetchPresets, fetchHistory, createRoomWithCode, joinRoomWithCode } from './services/api';
 import NexconnAdapter, { nexconn } from './services/nexconnAdapter';
 
 export default function App() {
   const [rooms, setRooms] = useState([]);
-  const [activeRoomId, setActiveRoomId] = useState('family-circle');
+  const [activeRoomId, setActiveRoomId] = useState(null); // null = show lobby
+  const [activeUserName, setActiveUserName] = useState('Rohan');
+  const [phoneBUserName, setPhoneBUserName] = useState('Maa');
+  const [lobbyError, setLobbyError] = useState(null);
+  const [isLobbyLoading, setIsLobbyLoading] = useState(false);
   const [messages, setMessages] = useState([]);
   const [presets, setPresets] = useState([]);
   const [history, setHistory] = useState([]);
@@ -43,9 +48,9 @@ export default function App() {
 
   // Radar session counters
   const [stats, setStats] = useState({
-    checked: 14,
-    stopped: 11,
-    avgSpeed: 410
+    checked: 0,
+    stopped: 0,
+    avgSpeed: 0
   });
 
   // Dedicated secondary Nexconn adapter for User B in Split-Screen Mode
@@ -54,29 +59,25 @@ export default function App() {
   // Initial data loading
   useEffect(() => {
     async function init() {
-      const [fetchedRooms, fetchedPresets, fetchedHistory] = await Promise.all([
-        fetchRooms(),
+      const [fetchedPresets, fetchedHistory] = await Promise.all([
         fetchPresets(),
         fetchHistory()
       ]);
-      setRooms(fetchedRooms);
       setPresets(fetchedPresets);
       if (fetchedHistory && fetchedHistory.length > 0) {
         setHistory(fetchedHistory);
       }
-
-      const initMsgs = await fetchRoomMessages('family-circle');
-      setMessages(initMsgs);
     }
     init();
   }, []);
 
-  // Connect Primary Nexconn Adapter (User A: Rohan)
+  // Connect Primary Nexconn Adapter (User A)
   useEffect(() => {
+    if (!activeRoomId) return; // Don't connect until we have a room
     nexconn.connect({
       roomId: activeRoomId,
-      userId: 'rohan',
-      userName: 'Rohan'
+      userId: 'userA',
+      userName: activeUserName
     });
 
     const unsubMsg = nexconn.onMessage((msg) => {
@@ -139,13 +140,13 @@ export default function App() {
     };
   }, [activeRoomId]);
 
-  // Connect Secondary Nexconn Adapter for User B (Maa) when split screen is active
+  // Connect Secondary Nexconn Adapter for User B when split screen is active
   useEffect(() => {
-    if (isSplitScreen) {
+    if (isSplitScreen && activeRoomId) {
       nexconnUserB.current.connect({
         roomId: activeRoomId,
-        userId: 'maa',
-        userName: 'Maa'
+        userId: 'userB',
+        userName: phoneBUserName
       });
     } else {
       nexconnUserB.current.disconnect();
@@ -165,59 +166,77 @@ export default function App() {
     });
   };
 
+  // ─── RoomLobby handlers (TC-XXXX invite code flow) ──────────────────────────
+  const handleLobbyCreate = async ({ groupName, creatorName }) => {
+    setIsLobbyLoading(true);
+    setLobbyError(null);
+    try {
+      const room = await createRoomWithCode({ groupName, creatorName });
+      setRooms(prev => [...prev, room]);
+      setActiveUserName(creatorName);
+      setActiveRoomId(room.invite_code);
+      setMessages([]);
+    } catch (err) {
+      setLobbyError('Failed to create room. Is the backend running?');
+    } finally {
+      setIsLobbyLoading(false);
+    }
+  };
+
+  const handleLobbyJoin = async ({ inviteCode, userName }) => {
+    setIsLobbyLoading(true);
+    setLobbyError(null);
+    try {
+      const room = await joinRoomWithCode({ inviteCode, userName });
+      // Add to rooms list if not already there
+      setRooms(prev => prev.some(r => r.id === room.id) ? prev : [...prev, room]);
+      setActiveUserName(userName);
+      setActiveRoomId(room.invite_code);
+      setMessages([]);
+    } catch (err) {
+      setLobbyError(`Room code "${inviteCode}" not found. Ask the group creator for the correct code.`);
+    } finally {
+      setIsLobbyLoading(false);
+    }
+  };
+
   // Switch Room
   const handleSelectRoom = async (roomId) => {
     setActiveRoomId(roomId);
-    const msgs = await fetchRoomMessages(roomId);
-    setMessages(msgs || []);
+    setMessages([]);
   };
 
-  // Create New Group Live
+  // Create New Group via sidebar — opens lobby in create tab overlay
   const handleCreateNewGroup = async (e) => {
     e?.preventDefault();
     if (!newRoomName.trim()) return;
-
-    const roomId = 'room-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 5);
-    const memberList = newRoomMembers.trim() 
-      ? newRoomMembers.split(',').map(m => m.trim()).filter(Boolean)
-      : ['Rohan', 'Maa', 'TruthCircle Bot'];
-
-    if (!memberList.includes('TruthCircle Bot')) {
-      memberList.push('TruthCircle Bot');
+    setIsLobbyLoading(true);
+    try {
+      const room = await createRoomWithCode({ groupName: newRoomName.trim(), creatorName: newRoomMembers.trim() || activeUserName });
+      setRooms(prev => [...prev, room]);
+      setActiveRoomId(room.invite_code);
+      setMessages([]);
+      setIsCreateRoomOpen(false);
+      setNewRoomName('');
+      setNewRoomMembers('');
+    } catch {
+      // fallback: local room
+      const roomId = `room-${Date.now().toString(36)}`;
+      const newRoomObj = {
+        id: roomId, name: newRoomName.trim(), description: `Created live`,
+        unread_count: 0, avatar: newRoomAvatar || '💬',
+        members: [activeUserName, 'TruthCircle Bot'],
+        invite_code: `TC-LOCAL`, is_protected: true
+      };
+      setRooms(prev => [...prev, newRoomObj]);
+      setActiveRoomId(roomId);
+      setMessages([]);
+      setIsCreateRoomOpen(false);
+      setNewRoomName('');
+      setNewRoomMembers('');
+    } finally {
+      setIsLobbyLoading(false);
     }
-
-    const newRoomObj = {
-      id: roomId,
-      name: newRoomName.trim(),
-      description: `Created live • ${memberList.join(', ')}`,
-      unread_count: 0,
-      avatar: newRoomAvatar || '💬',
-      members: memberList,
-      is_protected: true
-    };
-
-    // Save on backend & locally
-    await createRoom(newRoomObj);
-
-    setRooms(prev => [...prev, newRoomObj]);
-    setActiveRoomId(roomId);
-    setMessages([]);
-    setIsCreateRoomOpen(false);
-    setNewRoomName('');
-    setNewRoomMembers('');
-
-    // Broadcast room creation event across sync bus
-    nexconn.sendMessage({
-      id: `system-room-created-${Date.now()}`,
-      room_id: roomId,
-      sender_id: 'truthcircle-bot',
-      sender_name: 'TruthCircle Engine',
-      sender_avatar: '🛡️',
-      text: `🎉 Group "${newRoomName}" was created. Live firewall active.`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      is_forwarded: false,
-      card: null
-    });
   };
 
   // Send message from User A
@@ -392,10 +411,10 @@ export default function App() {
   };
 
   const currentRoom = rooms.find((r) => r.id === activeRoomId) || {
-    id: 'family-circle',
-    name: 'Family Circle 🇮🇳',
-    avatar: '👨‍👩‍👧‍👦',
-    members: ['Maa', 'Rohan', 'Uncle Vijay', 'TruthCircle Bot']
+    id: activeRoomId || 'room',
+    name: 'Group Chat',
+    avatar: '💬',
+    members: [activeUserName, phoneBUserName, 'TruthCircle Bot']
   };
 
   const filteredRooms = rooms.filter((r) => 
@@ -405,7 +424,20 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#0a0e17] text-slate-100 font-sans">
-      
+
+      {/* ── Lobby Gate: shown when no active room ── */}
+      {!activeRoomId && (
+        <RoomLobby
+          onCreateRoom={handleLobbyCreate}
+          onJoinRoom={handleLobbyJoin}
+          error={lobbyError}
+          isLoading={isLobbyLoading}
+        />
+      )}
+
+      {/* ── Main App: shown once room is active ── */}
+      {activeRoomId && (
+        <>
       {/* 1. Top Workspace Header & Misinformation Radar */}
       <DemoControlBar
         onInjectPreset={handleInjectPreset}
@@ -435,7 +467,7 @@ export default function App() {
                   👨‍💻
                 </span>
                 <div>
-                  <h3 className="text-xs font-bold text-slate-200">Rohan Sharma</h3>
+                  <h3 className="text-xs font-bold text-slate-200">{activeUserName}</h3>
                   <span className="text-[10px] text-emerald-400 font-mono">● Protected by TruthCircle</span>
                 </div>
               </div>
@@ -559,7 +591,14 @@ export default function App() {
             <span className="flex items-center gap-1 text-emerald-400">
               <ShieldCheck className="w-3.5 h-3.5" /> Nexconn Engine
             </span>
-            <span>v1.0.0</span>
+            <button
+              type="button"
+              onClick={() => { setActiveRoomId(null); setMessages([]); setLobbyError(null); }}
+              className="text-[10px] text-slate-400 hover:text-red-400 bg-slate-900 hover:bg-red-950/40 border border-slate-800 hover:border-red-700/50 px-2 py-0.5 rounded transition-all"
+              title="Leave current room and return to lobby"
+            >
+              ⬅ Leave Room
+            </button>
           </div>
         </aside>
         )}
@@ -567,11 +606,11 @@ export default function App() {
         {/* Central Chat Panes (Supports Single View and Dual Split-Screen View) */}
         <main className="flex-1 flex overflow-hidden">
           
-          {/* Left Pane: User A ("Rohan") */}
+          {/* Left Pane: User A */}
           <div className="flex-1 flex flex-col h-full min-w-0">
             <ChatPane
               room={currentRoom}
-              currentUser={{ id: 'rohan', name: 'Rohan (You)', avatar: '👨‍💻' }}
+              currentUser={{ id: 'userA', name: `${activeUserName} (You)`, avatar: '👨‍💻' }}
               messages={messages}
               onSendMessage={handleSendMessageUserA}
               onFactCheckMessage={handleFactCheckMessage}
@@ -580,7 +619,7 @@ export default function App() {
                 setIsDrawerOpen(true);
               }}
               onTruthCircleVerify={handleTruthCircleVerify}
-              onVote={(cId, vType) => handleConsensusVote(cId, vType, 'rohan')}
+              onVote={(cId, vType) => handleConsensusVote(cId, vType, 'userA')}
               votes={cardVotes}
               verifyingSteps={verifyingSteps}
               typingStatus={typingStatus}
@@ -588,19 +627,26 @@ export default function App() {
             />
           </div>
 
-          {/* Right Pane: User B ("Maa") in Split-Screen Multiplayer Stage Mode */}
+          {/* Right Pane: User B in Split-Screen Multiplayer Stage Mode */}
           {isSplitScreen && (
             <div className="flex-1 flex flex-col h-full min-w-0 border-l-2 border-indigo-500/40 animate-in slide-in-from-right duration-300">
               <div className="bg-gradient-to-r from-purple-950/40 to-indigo-950/40 px-3 py-1 border-b border-indigo-500/30 text-[11px] font-mono font-semibold text-purple-300 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <Smartphone className="w-3.5 h-3.5" />
-                  <span>Synced Phone 2: Maa's Device (User B)</span>
+                  <span>Synced Phone 2: {phoneBUserName}'s Device (User B)</span>
                 </span>
-                <span className="text-emerald-400 font-bold">● LIVE PEER SYNCED</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400 font-bold">● LIVE PEER SYNCED</span>
+                  {currentRoom.invite_code && (
+                    <span className="text-[10px] text-slate-400 font-mono bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded">
+                      Code: {currentRoom.invite_code}
+                    </span>
+                  )}
+                </div>
               </div>
               <ChatPane
                 room={currentRoom}
-                currentUser={{ id: 'maa', name: 'Maa (Elder)', avatar: '👵' }}
+                currentUser={{ id: 'userB', name: `${phoneBUserName}`, avatar: '👵' }}
                 messages={messages}
                 onSendMessage={handleSendMessageUserB}
                 onFactCheckMessage={handleFactCheckMessage}
@@ -609,7 +655,7 @@ export default function App() {
                   setIsDrawerOpen(true);
                 }}
                 onTruthCircleVerify={handleTruthCircleVerify}
-                onVote={(cId, vType) => handleConsensusVote(cId, vType, 'maa')}
+                onVote={(cId, vType) => handleConsensusVote(cId, vType, 'userB')}
                 votes={cardVotes}
                 verifyingSteps={verifyingSteps}
                 typingStatus={typingStatus}
@@ -636,7 +682,8 @@ export default function App() {
         history={history}
         activeRoomId={activeRoomId}
       />
-
+    </>
+    )}
     </div>
   );
 }
