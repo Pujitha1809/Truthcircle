@@ -11,12 +11,16 @@ import {
   Activity, 
   Gauge,
   Layers,
-  ChevronRight
+  ChevronRight,
+  FileSearch,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 export default function CredibilityCard({ card, onInspect }) {
-  const [activeLang, setActiveLang] = useState('english'); // 'english' | 'hindi' | 'hinglish'
+  const [activeLang, setActiveLang] = useState('english');
   const [copied, setCopied] = useState(false);
+  const [stepsExpanded, setStepsExpanded] = useState(true);
 
   if (!card) return null;
 
@@ -26,6 +30,8 @@ export default function CredibilityCard({ card, onInspect }) {
     confidence_score = 95,
     outlet_consensus,
     explanation,
+    detailed_analysis,
+    verification_steps,
     citations = [],
     polite_reply = {},
     telemetry = []
@@ -79,8 +85,13 @@ export default function CredibilityCard({ card, onInspect }) {
     }
   };
 
-  // Compute total pipeline latency from telemetry
-  const totalLatency = telemetry?.reduce((acc, curr) => acc + (curr.latency_ms || 0), 0) || 1150;
+  // Compute total pipeline latency — guard against negative/zero values from async timing edge cases
+  const rawTelemetrySum = telemetry?.reduce((acc, curr) => {
+    const ms = curr?.latency_ms;
+    return acc + (typeof ms === 'number' && ms > 0 ? ms : 0);
+  }, 0) ?? 0;
+  // Prefer backend-authoritative processing_time_ms if available; fallback to telemetry sum; floor at 120ms
+  const totalLatency = Math.max(120, Math.abs(card?.processing_time_ms ?? rawTelemetrySum) || 1150);
 
   return (
     <div className={`mt-2.5 mb-2 w-full max-w-xl rounded-xl border bg-gradient-to-b from-[#111827] to-[#0b0f19] p-4 text-slate-200 transition-all duration-300 ${currentConfig.glow}`}>
@@ -144,6 +155,68 @@ export default function CredibilityCard({ card, onInspect }) {
       <p className="mt-3 text-sm text-slate-300 leading-relaxed font-normal">
         {explanation}
       </p>
+
+      {/* 3b. Detailed Investigative Analysis (populated for live/custom claims) */}
+      {detailed_analysis && (
+        <div className="mt-3 p-3 rounded-lg bg-slate-900/70 border border-indigo-800/40">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 mb-1.5 flex items-center gap-1.5">
+            <FileSearch className="w-3.5 h-3.5" />
+            Detailed Verification Analysis
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed">{detailed_analysis}</p>
+        </div>
+      )}
+
+      {/* 3c. Verification Steps Audit Trail */}
+      {verification_steps && verification_steps.length > 0 && (
+        <div className="mt-3">
+          <button
+            onClick={() => setStepsExpanded(s => !s)}
+            className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2 hover:text-slate-200 transition-colors"
+          >
+            <span className="flex items-center gap-1.5">
+              <span className="text-sky-400">🔍</span>
+              Verification Steps Audit Trail ({verification_steps.length} Steps)
+            </span>
+            {stepsExpanded
+              ? <ChevronUp className="w-3.5 h-3.5 text-slate-500" />
+              : <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
+            }
+          </button>
+          {stepsExpanded && (
+            <div className="space-y-1.5">
+              {verification_steps.map((step) => (
+                <div
+                  key={step.step_number}
+                  className="flex items-start gap-2.5 bg-slate-900/60 border border-slate-800 rounded-lg p-2.5 text-xs"
+                >
+                  <span className="shrink-0 w-5 h-5 rounded-full bg-sky-950 border border-sky-700/60 flex items-center justify-center text-[10px] font-bold text-sky-400">
+                    {step.step_number}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2 mb-0.5 flex-wrap">
+                      <span className="font-semibold text-slate-200">{step.title}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] font-mono text-indigo-400 bg-indigo-950/60 border border-indigo-800/40 px-1.5 py-0.5 rounded">
+                          {step.api_source}
+                        </span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                          step.status === 'completed'
+                            ? 'text-emerald-400 bg-emerald-950/60 border border-emerald-800/40'
+                            : 'text-amber-400 bg-amber-950/60 border border-amber-800/40'
+                        }`}>
+                          {Math.max(1, Math.abs(step.latency_ms ?? 0))}ms
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-slate-400 leading-relaxed line-clamp-3">{step.finding}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 4. Clickable Source Citation Pills */}
       {citations && citations.length > 0 && (

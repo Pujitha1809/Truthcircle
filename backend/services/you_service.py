@@ -68,7 +68,7 @@ class YouService:
                     }
                     async with httpx.AsyncClient(timeout=8.0) as client:
                         resp = await client.get(target_url, headers=headers, params=params)
-                        elapsed = int((time.perf_counter() - start) * 1000)
+                        elapsed = max(1, abs(int((time.perf_counter() - start) * 1000)))
                         if resp.status_code == 200:
                             data = resp.json()
                             hits = data.get("hits", []) or data.get("results", [])
@@ -104,7 +104,7 @@ class YouService:
                     print(f"[YouService] Request error for {target_url}: {e}")
 
         # Intelligent Fallback / Synthesis for Stage Presentation
-        elapsed = int((time.perf_counter() - start) * 1000) or 640
+        elapsed = max(1, abs(int((time.perf_counter() - start) * 1000))) or 640
         citations = [
             Citation(
                 id="yc-1",

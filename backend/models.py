@@ -51,6 +51,10 @@ class CredibilityCard(BaseModel):
     created_at: str
     source_url: Optional[str] = None
     processing_time_ms: Optional[int] = Field(default=None)
+    detailed_analysis: Optional[str] = Field(default=None, description="3-4 sentence investigative breakdown explaining WHY the verdict was reached, citing exact evidence found.")
+    verification_steps: Optional[List[Dict[str, Any]]] = Field(default=None, description="Ordered audit trail of each verification step performed.")
+    detailed_analysis: Optional[str] = Field(default=None, description="3-4 sentence investigative breakdown explaining WHY the verdict was reached, citing exact evidence found.")
+    verification_steps: Optional[List[Dict[str, Any]]] = Field(default=None, description="Ordered audit trail of each verification step performed.")
 
 class VerifyRequest(BaseModel):
     claim: str

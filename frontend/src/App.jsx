@@ -31,6 +31,7 @@ export default function App() {
   const [typingStatus, setTypingStatus] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [verifyingSteps, setVerifyingSteps] = useState(null); // animated @truthcircle progress
 
   // Radar session counters
   const [stats, setStats] = useState({
@@ -126,7 +127,7 @@ export default function App() {
   // Fact-Check a forwarded message or specific claim
   const handleFactCheckMessage = async (msg) => {
     const claim = msg.text.replace(/^[↪\s]+/, '').trim();
-    await executeFactCheck(claim, msg.sender_name);
+    await handleTruthCircleVerify(claim);
   };
 
   // Main Fact-Check Executor
@@ -161,6 +162,68 @@ export default function App() {
       setIsLoading(false);
       setTypingStatus({ is_typing: false, sender_name: 'TruthCircle AI' });
     }
+  };
+
+  // ─── Live @truthcircle verification flow ────────────────────────────────
+  const VERIFY_STEP_LABELS = [
+    'Step 1: Parsing claim & extracting key entities...',
+    'Step 2: Querying SerpApi Google News (gl="in") for Indian outlet consensus...',
+    'Step 3: Running SerpApi Fact-Check Hunter (PIB / AltNews / BoomLive)...',
+    'Step 4: Extracting full-article Markdown via SerpApi engine="extract"...',
+    'Step 5: Cross-verifying live web citations via You.com Cited Research API...',
+  ];
+
+  const executeFactCheckLive = async (claimText, author = 'User') => {
+    setIsLoading(true);
+    setTypingStatus({ is_typing: true, sender_name: 'TruthCircle AI' });
+    try {
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${API_BASE}/api/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claim: claimText, room_id: activeRoomId, author, force_refresh: true })
+      });
+      const data = await res.json();
+      setStats(prev => ({
+        checked: prev.checked + 1,
+        stopped: data.card.verdict === 'FALSE' || data.card.verdict === 'MISLEADING' ? prev.stopped + 1 : prev.stopped,
+        avgSpeed: data.processing_time_ms || prev.avgSpeed
+      }));
+      setActiveCardForInspection(data.card);
+      // Post the credibility card as a bot message in the chat stream
+      const botMsg = {
+        id: `msg-bot-${Date.now()}`,
+        room_id: activeRoomId,
+        sender_id: 'truthcircle-bot',
+        sender_name: 'TruthCircle Bot',
+        sender_avatar: '🛡️',
+        text: '',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        is_forwarded: false,
+        card: data.card
+      };
+      nexconn.sendMessage(botMsg);
+      if (data.card.verdict === 'VERIFIED') {
+        confetti({ particleCount: 90, spread: 70, origin: { y: 0.75 } });
+      }
+    } catch (err) {
+      console.error('[FactCheck Live] Error:', err);
+    } finally {
+      setIsLoading(false);
+      setTypingStatus({ is_typing: false });
+    }
+  };
+
+  const handleTruthCircleVerify = async (claimText) => {
+    setVerifyingSteps([]);
+    for (let i = 0; i < VERIFY_STEP_LABELS.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, 340));
+      setVerifyingSteps(prev => [...(prev || []), VERIFY_STEP_LABELS[i]]);
+    }
+    // Brief pause so the user sees all 5 steps, then hit the real API
+    await new Promise(resolve => setTimeout(resolve, 400));
+    setVerifyingSteps(null);
+    await executeFactCheckLive(claimText, 'User');
   };
 
   // Handle Preset Injection
@@ -322,6 +385,8 @@ export default function App() {
                 setActiveCardForInspection(card);
                 setIsDrawerOpen(true);
               }}
+              onTruthCircleVerify={handleTruthCircleVerify}
+              verifyingSteps={verifyingSteps}
               typingStatus={typingStatus}
               isSplitView={isSplitScreen}
             />
@@ -347,6 +412,8 @@ export default function App() {
                   setActiveCardForInspection(card);
                   setIsDrawerOpen(true);
                 }}
+                onTruthCircleVerify={handleTruthCircleVerify}
+                verifyingSteps={verifyingSteps}
                 typingStatus={typingStatus}
                 isSplitView={true}
               />

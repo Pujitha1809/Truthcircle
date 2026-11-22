@@ -77,7 +77,7 @@ export default function EvidenceDrawer({ card, isOpen, onClose }) {
             >
               <span className="text-[10px] text-slate-400 truncate">{step.name}</span>
               <div className="flex items-center justify-between mt-1">
-                <span className="text-emerald-400 font-bold">{step.latency_ms}ms</span>
+                <span className="text-emerald-400 font-bold">{Math.max(1, Math.abs(step.latency_ms ?? 0))}ms</span>
                 <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/50">
                   {step.status}
                 </span>

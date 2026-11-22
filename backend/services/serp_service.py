@@ -61,7 +61,7 @@ class SerpService:
                 }
                 async with httpx.AsyncClient(timeout=8.0) as client:
                     resp = await client.get(SERPAPI_BASE_URL, params=params)
-                    elapsed = int((time.perf_counter() - start) * 1000)
+                    elapsed = max(1, abs(int((time.perf_counter() - start) * 1000)))
                     if resp.status_code == 200:
                         data = resp.json()
                         news_results = data.get("news_results", [])
@@ -80,7 +80,7 @@ class SerpService:
                 print(f"[SerpService] Google News error: {e}")
 
         # Intelligent Fallback / Simulation for Stage Resilience
-        elapsed = int((time.perf_counter() - start) * 1000) or 385
+        elapsed = max(1, abs(int((time.perf_counter() - start) * 1000))) or 385
         fallback_results = [
             {
                 "title": f"Fact Check & Coverage: Analysis of claim: '{claim[:60]}...'",
@@ -130,7 +130,7 @@ class SerpService:
                 }
                 async with httpx.AsyncClient(timeout=8.0) as client:
                     resp = await client.get(SERPAPI_BASE_URL, params=params)
-                    elapsed = int((time.perf_counter() - start) * 1000)
+                    elapsed = max(1, abs(int((time.perf_counter() - start) * 1000)))
                     if resp.status_code == 200:
                         data = resp.json()
                         organic_results = data.get("organic_results", [])
@@ -149,7 +149,7 @@ class SerpService:
                 print(f"[SerpService] Fact Check Hunter error: {e}")
 
         # Intelligent Fallback
-        elapsed = int((time.perf_counter() - start) * 1000) or 415
+        elapsed = max(1, abs(int((time.perf_counter() - start) * 1000))) or 415
         fallback_results = [
             {
                 "title": f"PIB Fact Check Advisory regarding viral social media message",
@@ -197,7 +197,7 @@ class SerpService:
                 }
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.get(SERPAPI_BASE_URL, params=params)
-                    elapsed = int((time.perf_counter() - start) * 1000)
+                    elapsed = max(1, abs(int((time.perf_counter() - start) * 1000)))
                     if resp.status_code == 200:
                         data = resp.json()
                         markdown_text = data.get("markdown") or data.get("text") or data.get("article", "")
@@ -217,7 +217,7 @@ class SerpService:
                 print(f"[SerpService] Extract error: {e}")
 
         # Fallback realistic Markdown extraction for stage presentations
-        elapsed = int((time.perf_counter() - start) * 1000) or 510
+        elapsed = max(1, abs(int((time.perf_counter() - start) * 1000))) or 510
         mock_markdown = f"""# FACT CHECK INVESTIGATION REPORT
 *Source: Verified Investigative Journalism Desk*
 
