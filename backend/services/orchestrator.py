@@ -18,7 +18,7 @@ from services.serp_service import serp_service
 from services.you_service import you_service
 
 class FactCheckOrchestrator:
-    async def verify(self, claim: str, source_url: str = None, force_refresh: bool = False) -> VerifyResponse:
+    async def verify(self, claim: str, source_url: str = None, force_refresh: bool = False, source_type: str = "text", extracted_ocr_text: str = None) -> VerifyResponse:
         start_time = time.perf_counter()
 
         # Step 0: Check persistent cache first for instant sub-80ms evaluation unless force_refresh is requested
@@ -223,6 +223,8 @@ class FactCheckOrchestrator:
             explanation=explanation,
             detailed_analysis=detailed_analysis,
             verification_steps=verification_steps,
+            source_type=source_type,
+            extracted_ocr_text=extracted_ocr_text,
             citations=unique_citations[:4],
             polite_reply=polite_reply,
             serpapi_extract_markdown=extracted_md,

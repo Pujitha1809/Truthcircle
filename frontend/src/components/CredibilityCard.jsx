@@ -32,6 +32,8 @@ export default function CredibilityCard({ card, onInspect }) {
     explanation,
     detailed_analysis,
     verification_steps,
+    source_type = 'text',
+    extracted_ocr_text,
     citations = [],
     polite_reply = {},
     telemetry = []
@@ -112,10 +114,18 @@ export default function CredibilityCard({ card, onInspect }) {
         </div>
 
         {/* Real-time verified badge */}
-        <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded-full">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-          Live Verified
-        </span>
+        <div className="flex items-center gap-1.5">
+          {source_type === 'image_ocr' && (
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-purple-300 bg-purple-950/70 border border-purple-800/50 px-2 py-0.5 rounded-full shadow-sm">
+              <span>🖼️</span>
+              <span>Screenshot OCR Verified</span>
+            </span>
+          )}
+          <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+            Live Verified
+          </span>
+        </div>
       </div>
 
       {/* Claim preview */}
@@ -123,6 +133,19 @@ export default function CredibilityCard({ card, onInspect }) {
         <span className="text-slate-500 not-italic font-semibold">Claim: </span>
         "{claim}"
       </div>
+
+      {/* Extracted Screenshot Text Box (if source_type === "image_ocr") */}
+      {source_type === 'image_ocr' && extracted_ocr_text && (
+        <div className="mt-2.5 p-2.5 rounded-lg bg-purple-950/30 border border-purple-800/40 text-xs">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-purple-400 uppercase tracking-wider mb-1">
+            <span>🖼️</span>
+            <span>Extracted Screenshot Text (OCR)</span>
+          </div>
+          <p className="text-slate-300 font-mono text-[11px] bg-black/40 p-2 rounded border border-purple-900/40 whitespace-pre-wrap leading-relaxed select-all">
+            "{extracted_ocr_text}"
+          </p>
+        </div>
+      )}
 
       {/* 2. Outlet Consensus Meter */}
       {outlet_consensus && (

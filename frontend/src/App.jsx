@@ -173,7 +173,7 @@ export default function App() {
     'Step 5: Cross-verifying live web citations via You.com Cited Research API...',
   ];
 
-  const executeFactCheckLive = async (claimText, author = 'User') => {
+  const executeFactCheckLive = async (claimText, author = 'User', sourceType = 'text', extractedOcrText = null) => {
     setIsLoading(true);
     setTypingStatus({ is_typing: true, sender_name: 'TruthCircle AI' });
     try {
@@ -181,7 +181,14 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ claim: claimText, room_id: activeRoomId, author, force_refresh: true })
+        body: JSON.stringify({ 
+          claim: claimText, 
+          room_id: activeRoomId, 
+          author, 
+          force_refresh: true,
+          source_type: sourceType,
+          extracted_ocr_text: extractedOcrText
+        })
       });
       const data = await res.json();
       setStats(prev => ({
@@ -214,16 +221,26 @@ export default function App() {
     }
   };
 
-  const handleTruthCircleVerify = async (claimText) => {
+  const handleTruthCircleVerify = async (claimText, sourceType = 'text', extractedOcrText = null) => {
     setVerifyingSteps([]);
-    for (let i = 0; i < VERIFY_STEP_LABELS.length; i++) {
+    
+    // Customize Step 1 if verifying image OCR
+    const initialSteps = sourceType === 'image_ocr' ? [
+      'Step 1: 🖼️ Scanning screenshot text via OCR & extracting claim entities...',
+      'Step 2: Querying SerpApi Google News (gl="in") for Indian outlet consensus...',
+      'Step 3: Running SerpApi Fact-Check Hunter (PIB / AltNews / BoomLive)...',
+      'Step 4: Extracting full-article Markdown via SerpApi engine="extract"...',
+      'Step 5: Cross-verifying live web citations via You.com Cited Research API...',
+    ] : VERIFY_STEP_LABELS;
+
+    for (let i = 0; i < initialSteps.length; i++) {
       await new Promise(resolve => setTimeout(resolve, 340));
-      setVerifyingSteps(prev => [...(prev || []), VERIFY_STEP_LABELS[i]]);
+      setVerifyingSteps(prev => [...(prev || []), initialSteps[i]]);
     }
     // Brief pause so the user sees all 5 steps, then hit the real API
     await new Promise(resolve => setTimeout(resolve, 400));
     setVerifyingSteps(null);
-    await executeFactCheckLive(claimText, 'User');
+    await executeFactCheckLive(claimText, 'User', sourceType, extractedOcrText);
   };
 
   // Handle Preset Injection

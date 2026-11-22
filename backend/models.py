@@ -53,8 +53,8 @@ class CredibilityCard(BaseModel):
     processing_time_ms: Optional[int] = Field(default=None)
     detailed_analysis: Optional[str] = Field(default=None, description="3-4 sentence investigative breakdown explaining WHY the verdict was reached, citing exact evidence found.")
     verification_steps: Optional[List[Dict[str, Any]]] = Field(default=None, description="Ordered audit trail of each verification step performed.")
-    detailed_analysis: Optional[str] = Field(default=None, description="3-4 sentence investigative breakdown explaining WHY the verdict was reached, citing exact evidence found.")
-    verification_steps: Optional[List[Dict[str, Any]]] = Field(default=None, description="Ordered audit trail of each verification step performed.")
+    source_type: Optional[str] = Field(default="text", description="text | image_ocr | forwarded_url")
+    extracted_ocr_text: Optional[str] = Field(default=None, description="Raw OCR text extracted from screenshot if source_type == image_ocr")
 
 class VerifyRequest(BaseModel):
     claim: str
@@ -62,6 +62,8 @@ class VerifyRequest(BaseModel):
     room_id: Optional[str] = "family-circle"
     author: Optional[str] = "User"
     force_refresh: bool = False
+    source_type: Optional[str] = "text"
+    extracted_ocr_text: Optional[str] = None
 
 class VerifyResponse(BaseModel):
     card: CredibilityCard
@@ -78,6 +80,7 @@ class ChatMessage(BaseModel):
     timestamp: str
     is_forwarded: bool = False
     forwarded_many_times: bool = False
+    image_url: Optional[str] = None
     reply_to: Optional[str] = None
     card: Optional[CredibilityCard] = None
 

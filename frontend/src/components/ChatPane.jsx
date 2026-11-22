@@ -12,8 +12,11 @@ import {
   Sparkles,
   Bot,
   Reply,
-  X
+  X,
+  Image as ImageIcon,
+  Loader2
 } from 'lucide-react';
+import { createWorker } from 'tesseract.js';
 import CredibilityCard from './CredibilityCard';
 
 // ─── Live Step-by-Step Verification Progress Bubble ─────────────────────────
@@ -71,37 +74,107 @@ export default function ChatPane({
 }) {
   const [inputText, setInputText] = useState('');
   const [isForwarded, setIsForwarded] = useState(false);
-  const [replyTo, setReplyTo] = useState(null); // { id, sender_name, text }
+  const [replyTo, setReplyTo] = useState(null); // { id, sender_name, text, image_url }
+  const [selectedImage, setSelectedImage] = useState(null); // data URL of image to send
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // Auto-scroll on new message or new verifying step
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, typingStatus, verifyingSteps]);
 
-  // Auto-detect "forwarded" heuristic: multi-line paste or starts with common viral patterns
+  // Handle Ctrl+V image pasting into composer
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (loadEvt) => {
+            setSelectedImage(loadEvt.target.result);
+            setIsForwarded(true); // pasted images usually mimic forwarded screenshots
+          };
+          reader.readAsDataURL(file);
+          e.preventDefault();
+          break;
+        }
+      }
+    }
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (loadEvt) => {
+        setSelectedImage(loadEvt.target.result);
+        setIsForwarded(true);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Perform client-side OCR using Tesseract.js
+  const runOcrOnImage = async (imageUrl) => {
+    setIsOcrProcessing(true);
+    try {
+      const worker = await createWorker('eng');
+      const ret = await worker.recognize(imageUrl);
+      await worker.terminate();
+      return ret.data.text.trim();
+    } catch (err) {
+      console.error('[OCR Error]:', err);
+      return '';
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  };
+
+  const handleFactCheckImageMessage = async (msg) => {
+    if (!msg.image_url) return;
+    setIsOcrProcessing(true);
+    const extractedText = await runOcrOnImage(msg.image_url);
+    setIsOcrProcessing(false);
+    
+    // Fallback if image has very low text
+    const cleanClaim = extractedText.replace(/\n+/g, ' ').trim() || msg.text || 'Viral social media forward screenshot';
+    if (onTruthCircleVerify) {
+      onTruthCircleVerify(cleanClaim, 'image_ocr', extractedText || cleanClaim);
+    }
+  };
+
   const handleInputChange = (e) => {
     const val = e.target.value;
     setInputText(val);
-    // Auto-toggle forwarded for multi-line pastes (WhatsApp forwards are typically multi-line)
     if (val.includes('\n') && val.length > 80) {
       setIsForwarded(true);
     }
   };
 
   const handleReply = (msg) => {
-    setReplyTo({ id: msg.id, sender_name: msg.sender_name, text: msg.text });
+    setReplyTo({ 
+      id: msg.id, 
+      sender_name: msg.sender_name, 
+      text: msg.text,
+      image_url: msg.image_url 
+    });
     inputRef.current?.focus();
   };
 
   const clearReply = () => setReplyTo(null);
+  const clearSelectedImage = () => setSelectedImage(null);
 
-  const handleSend = (e) => {
+  const handleSend = async (e) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
+    if (!inputText.trim() && !selectedImage) return;
 
     const text = inputText.trim();
+    const currentImage = selectedImage;
 
     // Build message payload
     const msgPayload = {
@@ -110,7 +183,8 @@ export default function ChatPane({
       sender_id: currentUser.id,
       sender_name: currentUser.name,
       sender_avatar: currentUser.avatar,
-      text,
+      text: text || (currentImage ? 'Shared an image' : ''),
+      image_url: currentImage || null,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       is_forwarded: isForwarded,
       forwarded_many_times: isForwarded,
@@ -120,31 +194,49 @@ export default function ChatPane({
       card: null
     };
 
-    // Post the message into the room first (always)
+    // Post the message into the room first
     onSendMessage(msgPayload);
 
     // Reset input state
-    const wasForwarded = isForwarded;
     setInputText('');
+    setSelectedImage(null);
     setIsForwarded(false);
 
     // Detect @truthcircle trigger
     const match = text.match(TRUTHCIRCLE_PATTERN);
     if (match && onTruthCircleVerify) {
       let claimText = (match[1] || '').trim();
-      // If bare @truthcircle (no extra text) + replying to a message, use the quoted message as the claim
-      if (!claimText && replyTo) {
+      let isImageOcr = false;
+      let ocrRawText = null;
+
+      // If replying to an image message with @truthcircle
+      if (!claimText && replyTo && replyTo.image_url) {
+        setIsOcrProcessing(true);
+        ocrRawText = await runOcrOnImage(replyTo.image_url);
+        setIsOcrProcessing(false);
+        claimText = ocrRawText.replace(/\n+/g, ' ').trim() || replyTo.text;
+        isImageOcr = true;
+      } else if (!claimText && replyTo) {
         claimText = replyTo.text.replace(/^[↪\s]+/, '').trim();
       }
+
+      // If user uploaded an image and typed @truthcircle in caption
+      if (currentImage && (!claimText || match)) {
+        setIsOcrProcessing(true);
+        ocrRawText = await runOcrOnImage(currentImage);
+        setIsOcrProcessing(false);
+        claimText = claimText || ocrRawText.replace(/\n+/g, ' ').trim();
+        isImageOcr = true;
+      }
+
       if (claimText) {
-        onTruthCircleVerify(claimText);
+        onTruthCircleVerify(claimText, isImageOcr ? 'image_ocr' : 'text', ocrRawText);
       }
     }
 
     setReplyTo(null);
   };
 
-  // Check if input looks like @truthcircle
   const isAtTruthCircle = TRUTHCIRCLE_PATTERN.test(inputText);
 
   return (
@@ -171,7 +263,7 @@ export default function ChatPane({
             </div>
             <p className="text-[11px] text-slate-400 flex items-center gap-1">
               <Shield className="w-3 h-3 text-emerald-400" />
-              <span>TruthCircle Bot Active • {room.members?.length || 4} members</span>
+              <span>TruthCircle Bot Active • Multi-Modal Protected</span>
             </p>
           </div>
         </div>
@@ -200,7 +292,7 @@ export default function ChatPane({
         <div className="text-center my-1">
           <span className="inline-flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/60 px-3 py-1 rounded-md border border-slate-800/60">
             <Shield className="w-3 h-3 text-emerald-400" />
-            Messages are analyzed in real-time by TruthCircle's multi-engine fact-check firewall
+            Messages & screenshots analyzed in real-time by TruthCircle OCR & fact-check pipeline
           </span>
         </div>
 
@@ -237,20 +329,20 @@ export default function ChatPane({
                   </div>
                 )}
 
-                {/* Forwarded Header with One-Click Fact-Check Button */}
+                {/* Forwarded Header (Text or Image) */}
                 {msg.is_forwarded && !isBot && (
                   <div className="mb-2 flex items-center justify-between bg-black/30 px-2 py-1 rounded border border-slate-750 text-xs">
                     <div className="flex items-center gap-1 text-[11px] italic text-amber-300">
                       <Forward className="w-3.5 h-3.5 text-amber-400" />
-                      <span>{msg.forwarded_many_times ? 'Forwarded many times' : 'Forwarded'}</span>
+                      <span>{msg.image_url ? '↪ Forwarded Screenshot' : (msg.forwarded_many_times ? 'Forwarded many times' : 'Forwarded')}</span>
                     </div>
 
                     <button
-                      onClick={() => onFactCheckMessage(msg)}
+                      onClick={() => msg.image_url ? handleFactCheckImageMessage(msg) : onFactCheckMessage(msg)}
                       className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded text-[10px] font-bold transition-all active:scale-95"
                     >
                       <Search className="w-2.5 h-2.5" />
-                      <span>🔍 Fact-Check</span>
+                      <span>{msg.image_url ? '🔍 Fact-Check Screenshot' : '🔍 Fact-Check'}</span>
                     </button>
                   </div>
                 )}
@@ -263,9 +355,29 @@ export default function ChatPane({
                   </div>
                 )}
 
-                {/* @truthcircle highlight in message text */}
-                {!isBot && (
-                  <p className="text-xs leading-relaxed whitespace-pre-wrap select-text">
+                {/* Image Screenshot Body */}
+                {msg.image_url && !isBot && (
+                  <div className="relative rounded-lg overflow-hidden border border-slate-700/60 my-1 group/img">
+                    <img 
+                      src={msg.image_url} 
+                      alt="Uploaded Screenshot" 
+                      className="max-h-60 w-auto rounded object-cover shadow"
+                    />
+                    {!msg.is_forwarded && (
+                      <button
+                        onClick={() => handleFactCheckImageMessage(msg)}
+                        className="absolute bottom-2 right-2 flex items-center gap-1 bg-black/80 hover:bg-black text-amber-300 border border-amber-500/50 px-2.5 py-1 rounded text-[11px] font-bold shadow-lg backdrop-blur-sm transition-all"
+                      >
+                        <Search className="w-3 h-3 text-amber-400" />
+                        <span>OCR Fact-Check</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Message Text */}
+                {!isBot && msg.text && (
+                  <p className="text-xs leading-relaxed whitespace-pre-wrap select-text mt-1">
                     {msg.text.split(/(@truthcircle)/i).map((part, idx) =>
                       /^@truthcircle$/i.test(part)
                         ? <span key={idx} className="text-emerald-400 font-bold bg-emerald-950/40 px-0.5 rounded">{part}</span>
@@ -274,7 +386,7 @@ export default function ChatPane({
                   </p>
                 )}
 
-                {/* Hover action bar: Reply + Fact-Check (for non-forwarded messages) */}
+                {/* Hover action bar: Reply + Fact-Check */}
                 {!isBot && !msg.is_forwarded && (
                   <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
@@ -285,11 +397,11 @@ export default function ChatPane({
                       <span>Reply</span>
                     </button>
                     <button
-                      onClick={() => onFactCheckMessage(msg)}
+                      onClick={() => msg.image_url ? handleFactCheckImageMessage(msg) : onFactCheckMessage(msg)}
                       className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-amber-300 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 px-2 py-0.5 rounded transition-colors"
                     >
                       <Search className="w-2.5 h-2.5" />
-                      <span>🔍 Fact-Check</span>
+                      <span>{msg.image_url ? '🔍 Scan OCR' : '🔍 Fact-Check'}</span>
                     </button>
                   </div>
                 )}
@@ -312,6 +424,14 @@ export default function ChatPane({
             </div>
           );
         })}
+
+        {/* Live OCR Scanner Indicator */}
+        {isOcrProcessing && (
+          <div className="flex items-center gap-2 text-xs text-purple-300 bg-purple-950/70 border border-purple-800/60 p-2.5 rounded-xl w-fit animate-pulse shadow-md">
+            <Loader2 className="w-4 h-4 text-purple-400 animate-spin" />
+            <span className="font-medium">🖼️ Tesseract OCR scanning screenshot text & layout...</span>
+          </div>
+        )}
 
         {/* Live Verification Progress Bubble */}
         {verifyingSteps && verifyingSteps.length > 0 && (
@@ -345,7 +465,7 @@ export default function ChatPane({
               <Reply className="w-3.5 h-3.5 text-sky-400 shrink-0" />
               <div className="min-w-0">
                 <span className="text-sky-400 font-semibold">{replyTo.sender_name}</span>
-                <p className="text-slate-400 truncate">{replyTo.text}</p>
+                <p className="text-slate-400 truncate">{replyTo.text || (replyTo.image_url ? 'Screenshot Image' : '')}</p>
               </div>
             </div>
             <button
@@ -356,12 +476,35 @@ export default function ChatPane({
             </button>
           </div>
         )}
+
+        {/* Selected Image Attachment Preview Bar */}
+        {selectedImage && (
+          <div className="flex items-center justify-between bg-purple-950/30 border border-purple-800/50 rounded-lg p-2 mb-2">
+            <div className="flex items-center gap-2.5">
+              <img src={selectedImage} alt="Attachment" className="h-10 w-10 object-cover rounded border border-purple-700/50" />
+              <div>
+                <span className="text-xs font-semibold text-purple-300 flex items-center gap-1">
+                  <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Screenshot attached</span>
+                </span>
+                <span className="text-[10px] text-slate-400">Ready for OCR fact-check</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={clearSelectedImage}
+              className="text-slate-400 hover:text-slate-200 p-1 rounded-md"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         
         {/* Helper Hint + Forwarded Toggle */}
         <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2 px-1">
           <span className="flex items-center gap-1 text-slate-400">
             <Sparkles className="w-3 h-3 text-amber-400" />
-            <span>Tag <code className="text-emerald-400 font-mono font-bold">@truthcircle</code> to verify live</span>
+            <span>Paste/attach screenshot or tag <code className="text-emerald-400 font-mono font-bold">@truthcircle</code></span>
           </span>
 
           {/* ↪ Forwarded Toggle Pill */}
@@ -379,6 +522,15 @@ export default function ChatPane({
           </button>
         </div>
 
+        {/* Hidden File Input for Paperclip */}
+        <input 
+          ref={fileInputRef}
+          type="file" 
+          accept="image/png,image/jpeg,image/webp" 
+          className="hidden" 
+          onChange={handleFileChange}
+        />
+
         <form onSubmit={handleSend} className="flex items-center gap-2">
           <button 
             type="button" 
@@ -388,9 +540,12 @@ export default function ChatPane({
           </button>
           <button 
             type="button" 
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2 text-slate-400 hover:text-purple-300 hover:bg-slate-800 rounded-lg transition-colors relative"
+            title="Attach Screenshot / Image"
           >
             <Paperclip className="w-4 h-4" />
+            {selectedImage && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>}
           </button>
 
           <input
@@ -398,27 +553,34 @@ export default function ChatPane({
             type="text"
             value={inputText}
             onChange={handleInputChange}
+            onPaste={handlePaste}
             placeholder={
-              replyTo
-                ? `Reply to ${replyTo.sender_name}... (type @truthcircle to verify)`
-                : `Message as ${currentUser.name}... (try: @truthcircle <any claim>)`
+              selectedImage
+                ? "Add a caption or type @truthcircle to verify screenshot..."
+                : replyTo
+                  ? `Reply to ${replyTo.sender_name}... (type @truthcircle to verify)`
+                  : `Message or Ctrl+V screenshot... (try: @truthcircle <claim>)`
             }
             className={`flex-1 bg-slate-900 text-xs text-slate-200 placeholder-slate-500 px-3.5 py-2.5 rounded-xl border transition-colors shadow-inner focus:outline-none ${
               isAtTruthCircle
                 ? 'border-emerald-500 ring-1 ring-emerald-500/30'
-                : isForwarded
-                  ? 'border-amber-500/50 ring-1 ring-amber-500/20'
-                  : 'border-slate-800 focus:border-emerald-500'
+                : selectedImage
+                  ? 'border-purple-500/60 ring-1 ring-purple-500/30'
+                  : isForwarded
+                    ? 'border-amber-500/50 ring-1 ring-amber-500/20'
+                    : 'border-slate-800 focus:border-emerald-500'
             }`}
           />
 
-          {inputText.trim() ? (
+          {(inputText.trim() || selectedImage) ? (
             <button
               type="submit"
               className={`p-2.5 text-white rounded-xl shadow-md transition-all active:scale-95 ${
                 isAtTruthCircle
                   ? 'bg-emerald-500 hover:bg-emerald-400 ring-2 ring-emerald-400/40'
-                  : 'bg-emerald-600 hover:bg-emerald-500'
+                  : selectedImage
+                    ? 'bg-purple-600 hover:bg-purple-500'
+                    : 'bg-emerald-600 hover:bg-emerald-500'
               }`}
             >
               <Send className="w-4 h-4" />

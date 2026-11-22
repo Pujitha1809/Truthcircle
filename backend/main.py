@@ -231,7 +231,13 @@ async def verify_claim(req: VerifyRequest):
     3. Runs You.com Cited Research & RAG
     4. Posts Credibility Card into room via WebSocket broadcast
     """
-    res = await orchestrator.verify(claim=req.claim, source_url=req.url, force_refresh=req.force_refresh)
+    res = await orchestrator.verify(
+        claim=req.claim,
+        source_url=req.url,
+        force_refresh=req.force_refresh,
+        source_type=req.source_type or "text",
+        extracted_ocr_text=req.extracted_ocr_text
+    )
 
     # Post Credibility Card directly into the room's stream
     room_id = req.room_id or "family-circle"

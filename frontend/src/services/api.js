@@ -60,11 +60,19 @@ export async function fetchRoomMessages(roomId) {
   }
 }
 
-export async function verifyClaim({ claim, url, roomId = 'family-circle', author = 'User' }) {
+export async function verifyClaim({ claim, url, roomId = 'family-circle', author = 'User', sourceType = 'text', extractedOcrText = null, forceRefresh = false }) {
   const res = await fetch(`${API_BASE}/api/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ claim, url, room_id: roomId, author })
+    body: JSON.stringify({ 
+      claim, 
+      url, 
+      room_id: roomId, 
+      author,
+      source_type: sourceType,
+      extracted_ocr_text: extractedOcrText,
+      force_refresh: forceRefresh
+    })
   });
   if (!res.ok) {
     throw new Error(`Verification failed with status ${res.status}`);
