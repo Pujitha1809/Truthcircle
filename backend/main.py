@@ -118,64 +118,12 @@ ROOMS_CATALOG: Dict[str, RoomInfo] = {
     )
 }
 
-# Initial Conversation Threads per Room
-DEFAULT_CHAT_HISTORY: Dict[str, List[dict]] = {
-    "family-circle": [
-        {
-            "id": "msg-1",
-            "room_id": "family-circle",
-            "sender_id": "maa",
-            "sender_name": "Maa",
-            "sender_avatar": "👵",
-            "text": "Good morning beta! Have a blessed day ahead 🙏🌺",
-            "timestamp": "08:15 AM",
-            "is_forwarded": False,
-            "forwarded_many_times": False,
-            "card": None
-        },
-        {
-            "id": "msg-2",
-            "room_id": "family-circle",
-            "sender_id": "vijay",
-            "sender_name": "Uncle Vijay",
-            "sender_avatar": "🧔",
-            "text": "UNESCO has officially declared Jana Gana Mana as the best national anthem in the world! Forward to all groups 🇮🇳",
-            "timestamp": "08:22 AM",
-            "is_forwarded": True,
-            "forwarded_many_times": True,
-            "card": None
-        }
-    ],
-    "mumbai-commuters": [
-        {
-            "id": "msg-mc-1",
-            "room_id": "mumbai-commuters",
-            "sender_id": "vikram",
-            "sender_name": "Vikram",
-            "sender_avatar": "🧑‍💼",
-            "text": "Western Line trains running on schedule from Churchgate to Borivali today.",
-            "timestamp": "09:02 AM",
-            "is_forwarded": False,
-            "card": None
-        }
-    ],
-    "brand-watch": [
-        {
-            "id": "msg-bw-1",
-            "room_id": "brand-watch",
-            "sender_id": "security",
-            "sender_name": "Security Lead",
-            "sender_avatar": "🛡️",
-            "text": "Monitoring 4 suspicious WhatsApp phishing links targeting Diwali gift vouchers.",
-            "timestamp": "10:14 AM",
-            "is_forwarded": False,
-            "card": None
-        }
-    ]
+# In-memory session message store — starts 100% blank
+room_messages: Dict[str, List[dict]] = {
+    "family-circle": [],
+    "mumbai-commuters": [],
+    "brand-watch": []
 }
-
-# In-memory session message store
-room_messages: Dict[str, List[dict]] = {k: list(v) for k, v in DEFAULT_CHAT_HISTORY.items()}
 
 @app.get("/api/health")
 async def health_check():
@@ -240,6 +188,13 @@ async def get_verification_history():
 @app.get("/api/rooms")
 async def get_rooms():
     return list(ROOMS_CATALOG.values())
+
+@app.post("/api/rooms")
+async def create_room(room: RoomInfo):
+    """Creates a new room dynamically and initializes an empty message log."""
+    ROOMS_CATALOG[room.id] = room
+    room_messages[room.id] = []
+    return room
 
 @app.get("/api/rooms/{room_id}/messages")
 async def get_room_messages(room_id: str):

@@ -298,137 +298,147 @@ export default function ChatPane({
           </span>
         </div>
 
-        {/* Message Items */}
-        {messages.map((msg) => {
-          const isMe = msg.sender_id === currentUser.id;
-          const isBot = msg.sender_id === 'truthcircle-bot';
+        {/* Message Items or Empty State */}
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center my-12 text-center p-6 border border-dashed border-slate-800/80 rounded-2xl bg-slate-900/30 max-w-md mx-auto">
+            <span className="text-3xl mb-2">{room.avatar || '💬'}</span>
+            <h3 className="text-sm font-bold text-slate-200">Welcome to {room.name}!</h3>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              No messages yet. Type a message below, paste a screenshot with <span className="text-slate-300 font-mono">Ctrl+V</span>, or tag <code className="text-emerald-400 font-mono font-bold">@truthcircle &lt;claim&gt;</code> to verify live.
+            </p>
+          </div>
+        ) : (
+          messages.map((msg) => {
+            const isMe = msg.sender_id === currentUser.id;
+            const isBot = msg.sender_id === 'truthcircle-bot';
 
-          return (
-            <div 
-              key={msg.id} 
-              className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group transition-all`}
-            >
-              {/* Message Bubble Container */}
+            return (
               <div 
-                className={`max-w-[85%] sm:max-w-md rounded-2xl p-3 chat-bubble-shadow transition-all ${
-                  isBot
-                    ? 'w-full max-w-xl bg-transparent p-0'
-                    : isMe
-                      ? 'bg-gradient-to-tr from-emerald-800/90 to-teal-700/90 text-white rounded-br-xs border border-emerald-600/40'
-                      : 'bg-[#182030] text-slate-200 rounded-bl-xs border border-slate-750'
-                }`}
+                key={msg.id} 
+                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group transition-all`}
               >
-                {/* Regular Chat Bubble Header */}
-                {!isBot && (
-                  <div className="flex items-center justify-between text-[11px] mb-1 gap-2">
-                    <span className="font-semibold text-slate-300 flex items-center gap-1">
-                      <span>{msg.sender_avatar}</span>
-                      <span>{msg.sender_name}</span>
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {msg.timestamp}
-                    </span>
-                  </div>
-                )}
-
-                {/* Forwarded Header (Text or Image) */}
-                {msg.is_forwarded && !isBot && (
-                  <div className="mb-2 flex items-center justify-between bg-black/30 px-2 py-1 rounded border border-slate-750 text-xs">
-                    <div className="flex items-center gap-1 text-[11px] italic text-amber-300">
-                      <Forward className="w-3.5 h-3.5 text-amber-400" />
-                      <span>{msg.image_url ? '↪ Forwarded Screenshot' : (msg.forwarded_many_times ? 'Forwarded many times' : 'Forwarded')}</span>
+                {/* Message Bubble Container */}
+                <div 
+                  className={`max-w-[85%] sm:max-w-md rounded-2xl p-3 chat-bubble-shadow transition-all ${
+                    isBot
+                      ? 'w-full max-w-xl bg-transparent p-0'
+                      : isMe
+                        ? 'bg-gradient-to-tr from-emerald-800/90 to-teal-700/90 text-white rounded-br-xs border border-emerald-600/40'
+                        : 'bg-[#182030] text-slate-200 rounded-bl-xs border border-slate-750'
+                  }`}
+                >
+                  {/* Regular Chat Bubble Header */}
+                  {!isBot && (
+                    <div className="flex items-center justify-between text-[11px] mb-1 gap-2">
+                      <span className="font-semibold text-slate-300 flex items-center gap-1">
+                        <span>{msg.sender_avatar}</span>
+                        <span>{msg.sender_name}</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {msg.timestamp}
+                      </span>
                     </div>
+                  )}
 
-                    <button
-                      onClick={() => msg.image_url ? handleFactCheckImageMessage(msg) : onFactCheckMessage(msg)}
-                      className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded text-[10px] font-bold transition-all active:scale-95"
-                    >
-                      <Search className="w-2.5 h-2.5" />
-                      <span>{msg.image_url ? '🔍 Fact-Check Screenshot' : '🔍 Fact-Check'}</span>
-                    </button>
-                  </div>
-                )}
+                  {/* Forwarded Header (Text or Image) */}
+                  {msg.is_forwarded && !isBot && (
+                    <div className="mb-2 flex items-center justify-between bg-black/30 px-2 py-1 rounded border border-slate-750 text-xs">
+                      <div className="flex items-center gap-1 text-[11px] italic text-amber-300">
+                        <Forward className="w-3.5 h-3.5 text-amber-400" />
+                        <span>{msg.image_url ? '↪ Forwarded Screenshot' : (msg.forwarded_many_times ? 'Forwarded many times' : 'Forwarded')}</span>
+                      </div>
 
-                {/* Reply-to quoted message preview */}
-                {msg.reply_to_text && !isBot && (
-                  <div className="mb-2 bg-sky-950/40 border-l-2 border-sky-500 px-2 py-1 rounded-r text-[11px]">
-                    <span className="text-sky-400 font-semibold">{msg.reply_to_sender || 'Message'}</span>
-                    <p className="text-slate-400 line-clamp-2 mt-0.5">{msg.reply_to_text}</p>
-                  </div>
-                )}
-
-                {/* Image Screenshot Body */}
-                {msg.image_url && !isBot && (
-                  <div className="relative rounded-lg overflow-hidden border border-slate-700/60 my-1 group/img">
-                    <img 
-                      src={msg.image_url} 
-                      alt="Uploaded Screenshot" 
-                      className="max-h-60 w-auto rounded object-cover shadow"
-                    />
-                    {!msg.is_forwarded && (
                       <button
-                        onClick={() => handleFactCheckImageMessage(msg)}
-                        className="absolute bottom-2 right-2 flex items-center gap-1 bg-black/80 hover:bg-black text-amber-300 border border-amber-500/50 px-2.5 py-1 rounded text-[11px] font-bold shadow-lg backdrop-blur-sm transition-all"
+                        onClick={() => msg.image_url ? handleFactCheckImageMessage(msg) : onFactCheckMessage(msg)}
+                        className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded text-[10px] font-bold transition-all active:scale-95"
                       >
-                        <Search className="w-3 h-3 text-amber-400" />
-                        <span>OCR Fact-Check</span>
+                        <Search className="w-2.5 h-2.5" />
+                        <span>{msg.image_url ? '🔍 Fact-Check Screenshot' : '🔍 Fact-Check'}</span>
                       </button>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )}
 
-                {/* Message Text */}
-                {!isBot && msg.text && (
-                  <p className="text-xs leading-relaxed whitespace-pre-wrap select-text mt-1">
-                    {msg.text.split(/(@truthcircle)/i).map((part, idx) =>
-                      /^@truthcircle$/i.test(part)
-                        ? <span key={idx} className="text-emerald-400 font-bold bg-emerald-950/40 px-0.5 rounded">{part}</span>
-                        : part
-                    )}
-                  </p>
-                )}
+                  {/* Reply-to quoted message preview */}
+                  {msg.reply_to_text && !isBot && (
+                    <div className="mb-2 bg-sky-950/40 border-l-2 border-sky-500 px-2 py-1 rounded-r text-[11px]">
+                      <span className="text-sky-400 font-semibold">{msg.reply_to_sender || 'Message'}</span>
+                      <p className="text-slate-400 line-clamp-2 mt-0.5">{msg.reply_to_text}</p>
+                    </div>
+                  )}
 
-                {/* Hover action bar: Reply + Fact-Check */}
-                {!isBot && !msg.is_forwarded && (
-                  <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => handleReply(msg)}
-                      className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-sky-300 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 px-2 py-0.5 rounded transition-colors"
-                    >
-                      <Reply className="w-3 h-3" />
-                      <span>Reply</span>
-                    </button>
-                    <button
-                      onClick={() => msg.image_url ? handleFactCheckImageMessage(msg) : onFactCheckMessage(msg)}
-                      className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-amber-300 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 px-2 py-0.5 rounded transition-colors"
-                    >
-                      <Search className="w-2.5 h-2.5" />
-                      <span>{msg.image_url ? '🔍 Scan OCR' : '🔍 Fact-Check'}</span>
-                    </button>
-                  </div>
-                )}
+                  {/* Image Screenshot Body */}
+                  {msg.image_url && !isBot && (
+                    <div className="relative rounded-lg overflow-hidden border border-slate-700/60 my-1 group/img">
+                      <img 
+                        src={msg.image_url} 
+                        alt="Uploaded Screenshot" 
+                        className="max-h-60 w-auto rounded object-cover shadow"
+                      />
+                      {!msg.is_forwarded && (
+                        <button
+                          onClick={() => handleFactCheckImageMessage(msg)}
+                          className="absolute bottom-2 right-2 flex items-center gap-1 bg-black/80 hover:bg-black text-amber-300 border border-amber-500/50 px-2.5 py-1 rounded text-[11px] font-bold shadow-lg backdrop-blur-sm transition-all"
+                        >
+                          <Search className="w-3 h-3 text-amber-400" />
+                          <span>OCR Fact-Check</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
 
-                {/* Message Read Receipt Footer */}
-                {!isBot && isMe && (
-                  <div className="flex justify-end mt-1">
-                    <CheckCheck className="w-3.5 h-3.5 text-sky-300" />
-                  </div>
-                )}
+                  {/* Message Text */}
+                  {!isBot && msg.text && (
+                    <p className="text-xs leading-relaxed whitespace-pre-wrap select-text mt-1">
+                      {msg.text.split(/(@truthcircle)/i).map((part, idx) =>
+                        /^@truthcircle$/i.test(part)
+                          ? <span key={idx} className="text-emerald-400 font-bold bg-emerald-950/40 px-0.5 rounded">{part}</span>
+                          : part
+                      )}
+                    </p>
+                  )}
 
-                {/* Inline Credibility Card */}
-                {msg.card && (
-                  <CredibilityCard 
-                    card={msg.card} 
-                    onInspect={onInspectCard}
-                    onVote={onVote}
-                    currentUserId={currentUser.id}
-                    votes={votes}
-                  />
-                )}
+                  {/* Hover action bar: Reply + Fact-Check */}
+                  {!isBot && !msg.is_forwarded && (
+                    <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => handleReply(msg)}
+                        className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-sky-300 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 px-2 py-0.5 rounded transition-colors"
+                      >
+                        <Reply className="w-3 h-3" />
+                        <span>Reply</span>
+                      </button>
+                      <button
+                        onClick={() => msg.image_url ? handleFactCheckImageMessage(msg) : onFactCheckMessage(msg)}
+                        className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-amber-300 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 px-2 py-0.5 rounded transition-colors"
+                      >
+                        <Search className="w-2.5 h-2.5" />
+                        <span>{msg.image_url ? '🔍 Scan OCR' : '🔍 Fact-Check'}</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Message Read Receipt Footer */}
+                  {!isBot && isMe && (
+                    <div className="flex justify-end mt-1">
+                      <CheckCheck className="w-3.5 h-3.5 text-sky-300" />
+                    </div>
+                  )}
+
+                  {/* Inline Credibility Card */}
+                  {msg.card && (
+                    <CredibilityCard 
+                      card={msg.card} 
+                      onInspect={onInspectCard}
+                      onVote={onVote}
+                      currentUserId={currentUser.id}
+                      votes={votes}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
 
         {/* Live OCR Scanner Indicator */}
         {isOcrProcessing && (

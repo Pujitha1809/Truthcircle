@@ -17,7 +17,7 @@ import DemoControlBar from './components/DemoControlBar';
 import ChatPane from './components/ChatPane';
 import EvidenceDrawer from './components/EvidenceDrawer';
 import RadarModal from './components/RadarModal';
-import { fetchHealth, fetchPresets, fetchRooms, fetchRoomMessages, verifyClaim, fetchHistory } from './services/api';
+import { fetchHealth, fetchPresets, fetchRooms, fetchRoomMessages, verifyClaim, fetchHistory, createRoom } from './services/api';
 import NexconnAdapter, { nexconn } from './services/nexconnAdapter';
 
 export default function App() {
@@ -31,6 +31,10 @@ export default function App() {
   const [activeCardForInspection, setActiveCardForInspection] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isRadarModalOpen, setIsRadarModalOpen] = useState(false);
+  const [isCreateRoomOpen, setIsCreateRoomOpen] = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
+  const [newRoomMembers, setNewRoomMembers] = useState('');
+  const [newRoomAvatar, setNewRoomAvatar] = useState('💬');
   const [typingStatus, setTypingStatus] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -165,7 +169,55 @@ export default function App() {
   const handleSelectRoom = async (roomId) => {
     setActiveRoomId(roomId);
     const msgs = await fetchRoomMessages(roomId);
-    setMessages(msgs);
+    setMessages(msgs || []);
+  };
+
+  // Create New Group Live
+  const handleCreateNewGroup = async (e) => {
+    e?.preventDefault();
+    if (!newRoomName.trim()) return;
+
+    const roomId = 'room-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 5);
+    const memberList = newRoomMembers.trim() 
+      ? newRoomMembers.split(',').map(m => m.trim()).filter(Boolean)
+      : ['Rohan', 'Maa', 'TruthCircle Bot'];
+
+    if (!memberList.includes('TruthCircle Bot')) {
+      memberList.push('TruthCircle Bot');
+    }
+
+    const newRoomObj = {
+      id: roomId,
+      name: newRoomName.trim(),
+      description: `Created live • ${memberList.join(', ')}`,
+      unread_count: 0,
+      avatar: newRoomAvatar || '💬',
+      members: memberList,
+      is_protected: true
+    };
+
+    // Save on backend & locally
+    await createRoom(newRoomObj);
+
+    setRooms(prev => [...prev, newRoomObj]);
+    setActiveRoomId(roomId);
+    setMessages([]);
+    setIsCreateRoomOpen(false);
+    setNewRoomName('');
+    setNewRoomMembers('');
+
+    // Broadcast room creation event across sync bus
+    nexconn.sendMessage({
+      id: `system-room-created-${Date.now()}`,
+      room_id: roomId,
+      sender_id: 'truthcircle-bot',
+      sender_name: 'TruthCircle Engine',
+      sender_avatar: '🛡️',
+      text: `🎉 Group "${newRoomName}" was created. Live firewall active.`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      is_forwarded: false,
+      card: null
+    });
   };
 
   // Send message from User A
@@ -406,9 +458,64 @@ export default function App() {
 
           {/* Rooms List */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Active Rooms ({filteredRooms.length})
+            <div className="px-2 py-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              <span>Active Rooms ({filteredRooms.length})</span>
+              <button
+                type="button"
+                onClick={() => setIsCreateRoomOpen(true)}
+                className="flex items-center gap-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800/60 text-emerald-300 px-2 py-0.5 rounded text-[10px] font-bold transition-all active:scale-95"
+              >
+                <span>➕ New Group</span>
+              </button>
             </div>
+
+            {/* Inline New Group Input Bar if open */}
+            {isCreateRoomOpen && (
+              <form onSubmit={handleCreateNewGroup} className="bg-slate-900/90 border border-emerald-500/50 p-2.5 rounded-xl space-y-2 mb-2 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-emerald-400">Create New Group</span>
+                  <button 
+                    type="button" 
+                    onClick={() => setIsCreateRoomOpen(false)}
+                    className="text-slate-400 hover:text-slate-200 text-xs"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={newRoomAvatar}
+                    onChange={(e) => setNewRoomAvatar(e.target.value)}
+                    placeholder="💬"
+                    className="w-10 bg-slate-950 text-center text-sm border border-slate-750 rounded p-1"
+                    title="Room Emoji Avatar"
+                  />
+                  <input
+                    type="text"
+                    value={newRoomName}
+                    onChange={(e) => setNewRoomName(e.target.value)}
+                    placeholder="e.g. Beyond 9to5 Judges"
+                    className="flex-1 bg-slate-950 text-xs text-slate-200 border border-slate-750 rounded px-2 py-1 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    autoFocus
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={newRoomMembers}
+                  onChange={(e) => setNewRoomMembers(e.target.value)}
+                  placeholder="Members (e.g. Pujitha, Teammate)"
+                  className="w-full bg-slate-950 text-[11px] text-slate-300 border border-slate-750 rounded px-2 py-1 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!newRoomName.trim()}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold py-1.5 rounded transition-all shadow-md active:scale-95"
+                >
+                  Create & Join Room
+                </button>
+              </form>
+            )}
 
             {filteredRooms.map((room) => {
               const isActive = room.id === activeRoomId;

@@ -60,6 +60,21 @@ export async function fetchRooms() {
   }
 }
 
+export async function createRoom(roomData) {
+  try {
+    const res = await fetch(`${API_BASE}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(roomData)
+    });
+    if (!res.ok) throw new Error('Create room failed');
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Create room error, using local fallback:', err);
+    return roomData;
+  }
+}
+
 export async function fetchRoomMessages(roomId) {
   try {
     const res = await fetch(`${API_BASE}/api/rooms/${roomId}/messages`);
