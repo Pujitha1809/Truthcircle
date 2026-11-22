@@ -1,6 +1,7 @@
 import asyncio
 import time
 import uuid
+import re
 from datetime import datetime, timezone
 from typing import Tuple, List
 
@@ -21,6 +22,12 @@ class FactCheckOrchestrator:
     async def verify(self, claim: str, source_url: str = None, force_refresh: bool = False, source_type: str = "text", extracted_ocr_text: str = None) -> VerifyResponse:
         start_time = time.perf_counter()
 
+        # Check for direct URL inside claim text
+        url_match = re.search(r'https?://[^\s<>"]+|www\.[^\s<>"]+', claim)
+        direct_url = url_match.group(0) if url_match else None
+        if direct_url and not direct_url.startswith("http"):
+            direct_url = f"https://{direct_url}"
+
         # Step 0: Check persistent cache first for instant sub-80ms evaluation unless force_refresh is requested
         if not force_refresh:
             cached_card = cache_store.get(claim)
@@ -40,7 +47,8 @@ class FactCheckOrchestrator:
         news_res, hunter_res = await asyncio.gather(news_task, hunter_task)
 
         # Step 2: Determine top article link for Deep Markdown Extraction
-        target_extract_url = source_url
+        # Prioritize directly detected URL in claim if present!
+        target_extract_url = direct_url or source_url
         if not target_extract_url:
             for item in hunter_res.get("results", []):
                 link = item.get("link")
@@ -223,8 +231,9 @@ class FactCheckOrchestrator:
             explanation=explanation,
             detailed_analysis=detailed_analysis,
             verification_steps=verification_steps,
-            source_type=source_type,
+            source_type="forwarded_url" if direct_url else source_type,
             extracted_ocr_text=extracted_ocr_text,
+            extracted_url=direct_url,
             citations=unique_citations[:4],
             polite_reply=polite_reply,
             serpapi_extract_markdown=extracted_md,

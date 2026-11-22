@@ -55,6 +55,7 @@ class CredibilityCard(BaseModel):
     verification_steps: Optional[List[Dict[str, Any]]] = Field(default=None, description="Ordered audit trail of each verification step performed.")
     source_type: Optional[str] = Field(default="text", description="text | image_ocr | forwarded_url")
     extracted_ocr_text: Optional[str] = Field(default=None, description="Raw OCR text extracted from screenshot if source_type == image_ocr")
+    extracted_url: Optional[str] = Field(default=None, description="Direct URL extracted from message text")
 
 class VerifyRequest(BaseModel):
     claim: str

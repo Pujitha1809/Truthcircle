@@ -35,6 +35,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [verifyingSteps, setVerifyingSteps] = useState(null); // animated @truthcircle progress
+  const [cardVotes, setCardVotes] = useState({}); // { [cardId]: { helpful: string[], needsContext: string[] } }
 
   // Radar session counters
   const [stats, setStats] = useState({
@@ -91,9 +92,45 @@ export default function App() {
       setTypingStatus(status);
     });
 
+    const unsubVote = nexconn.onVote((voteEvent) => {
+      if (!voteEvent || !voteEvent.card_id) return;
+      setCardVotes((prev) => {
+        const current = prev[voteEvent.card_id] || { helpful: ['initial-bot-reviewer'], needsContext: [] };
+        const { user_id, vote_type } = voteEvent;
+        
+        let newHelpful = [...(current.helpful || [])];
+        let newContext = [...(current.needsContext || [])];
+
+        if (vote_type === 'helpful') {
+          if (newHelpful.includes(user_id)) {
+            newHelpful = newHelpful.filter(id => id !== user_id);
+          } else {
+            newHelpful.push(user_id);
+            newContext = newContext.filter(id => id !== user_id);
+          }
+        } else if (vote_type === 'needsContext') {
+          if (newContext.includes(user_id)) {
+            newContext = newContext.filter(id => id !== user_id);
+          } else {
+            newContext.push(user_id);
+            newHelpful = newHelpful.filter(id => id !== user_id);
+          }
+        }
+
+        return {
+          ...prev,
+          [voteEvent.card_id]: {
+            helpful: newHelpful,
+            needsContext: newContext
+          }
+        };
+      });
+    });
+
     return () => {
       unsubMsg();
       unsubTyping();
+      unsubVote();
       nexconn.disconnect();
     };
   }, [activeRoomId]);
@@ -113,6 +150,16 @@ export default function App() {
       nexconnUserB.current.disconnect();
     };
   }, [isSplitScreen, activeRoomId]);
+
+  // Handle live multiplayer consensus vote
+  const handleConsensusVote = (cardId, voteType, userId = 'rohan') => {
+    nexconn.sendVote({
+      card_id: cardId,
+      user_id: userId,
+      vote_type: voteType,
+      room_id: activeRoomId
+    });
+  };
 
   // Switch Room
   const handleSelectRoom = async (roomId) => {
@@ -426,6 +473,8 @@ export default function App() {
                 setIsDrawerOpen(true);
               }}
               onTruthCircleVerify={handleTruthCircleVerify}
+              onVote={(cId, vType) => handleConsensusVote(cId, vType, 'rohan')}
+              votes={cardVotes}
               verifyingSteps={verifyingSteps}
               typingStatus={typingStatus}
               isSplitView={isSplitScreen}
@@ -453,6 +502,8 @@ export default function App() {
                   setIsDrawerOpen(true);
                 }}
                 onTruthCircleVerify={handleTruthCircleVerify}
+                onVote={(cId, vType) => handleConsensusVote(cId, vType, 'maa')}
+                votes={cardVotes}
                 verifyingSteps={verifyingSteps}
                 typingStatus={typingStatus}
                 isSplitView={true}

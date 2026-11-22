@@ -9,15 +9,18 @@ import {
   Check, 
   Sparkles, 
   Activity, 
-  Gauge,
-  Layers,
-  ChevronRight,
-  FileSearch,
-  ChevronDown,
-  ChevronUp
+  Gauge, 
+  Layers, 
+  ChevronRight, 
+  FileSearch, 
+  ChevronDown, 
+  ChevronUp,
+  ThumbsUp,
+  Flag,
+  Users
 } from 'lucide-react';
 
-export default function CredibilityCard({ card, onInspect }) {
+export default function CredibilityCard({ card, onInspect, onVote, currentUserId = 'rohan', votes = {} }) {
   const [activeLang, setActiveLang] = useState('english');
   const [copied, setCopied] = useState(false);
   const [stepsExpanded, setStepsExpanded] = useState(true);
@@ -25,6 +28,7 @@ export default function CredibilityCard({ card, onInspect }) {
   if (!card) return null;
 
   const {
+    id: cardId,
     claim,
     verdict = 'FALSE',
     confidence_score = 95,
@@ -34,10 +38,19 @@ export default function CredibilityCard({ card, onInspect }) {
     verification_steps,
     source_type = 'text',
     extracted_ocr_text,
+    extracted_url,
     citations = [],
     polite_reply = {},
     telemetry = []
   } = card;
+
+  // Read vote counts for this card (defaults: helpful=1, needs_context=0)
+  const cardVotes = votes[cardId] || { helpful: ['initial-bot-reviewer'], needsContext: [] };
+  const helpfulCount = cardVotes.helpful ? cardVotes.helpful.length : 1;
+  const contextCount = cardVotes.needsContext ? cardVotes.needsContext.length : 0;
+  const hasVotedHelpful = cardVotes.helpful && cardVotes.helpful.includes(currentUserId);
+  const hasVotedContext = cardVotes.needsContext && cardVotes.needsContext.includes(currentUserId);
+  const isGroupConsensusVerified = helpfulCount >= 2;
 
   // Semantic styles
   const verdictConfig = {
@@ -113,8 +126,20 @@ export default function CredibilityCard({ card, onInspect }) {
           </div>
         </div>
 
-        {/* Real-time verified badge */}
-        <div className="flex items-center gap-1.5">
+        {/* Real-time verified badge & Consensus badge */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {isGroupConsensusVerified && (
+            <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/60 px-2.5 py-0.5 rounded-full shadow-md animate-in fade-in duration-300">
+              <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
+              <span>✅ Verified by Group Consensus</span>
+            </span>
+          )}
+          {extracted_url && (
+            <span className="flex items-center gap-1 text-[10px] font-semibold text-sky-300 bg-sky-950/70 border border-sky-800/50 px-2 py-0.5 rounded-full shadow-sm">
+              <span>🔗</span>
+              <span>Live Webpage Extracted (SerpApi)</span>
+            </span>
+          )}
           {source_type === 'image_ocr' && (
             <span className="flex items-center gap-1 text-[11px] font-semibold text-purple-300 bg-purple-950/70 border border-purple-800/50 px-2 py-0.5 rounded-full shadow-sm">
               <span>🖼️</span>
@@ -320,6 +345,52 @@ export default function CredibilityCard({ card, onInspect }) {
                 <span>Copy Polite Reply</span>
               </>
             )}
+          </button>
+        </div>
+      </div>
+
+      {/* 5b. Live Multiplayer Community Notes Consensus Voting */}
+      <div className="mt-3.5 pt-2.5 border-t border-slate-800/70 flex items-center justify-between flex-wrap gap-2 text-xs">
+        <div className="flex items-center gap-1.5 text-slate-400 font-mono text-[11px]">
+          <Users className="w-3.5 h-3.5 text-indigo-400" />
+          <span className="font-semibold text-slate-300">Group Consensus:</span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Helpful Reaction Button */}
+          <button
+            type="button"
+            onClick={() => onVote && onVote(cardId, 'helpful')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold border transition-all active:scale-95 ${
+              hasVotedHelpful
+                ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50 shadow-sm'
+                : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800 hover:text-white'
+            }`}
+            title="Vote this fact-check as helpful and accurate"
+          >
+            <ThumbsUp className={`w-3.5 h-3.5 ${hasVotedHelpful ? 'text-emerald-400 fill-emerald-400/20' : 'text-slate-400'}`} />
+            <span>Helpful</span>
+            <span className="font-mono bg-black/40 px-1.5 py-0.2 rounded text-[10px] text-emerald-400 font-bold ml-0.5">
+              {helpfulCount}
+            </span>
+          </button>
+
+          {/* Needs Context Reaction Button */}
+          <button
+            type="button"
+            onClick={() => onVote && onVote(cardId, 'needsContext')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold border transition-all active:scale-95 ${
+              hasVotedContext
+                ? 'bg-amber-600/30 text-amber-300 border-amber-500/50 shadow-sm'
+                : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800 hover:text-white'
+            }`}
+            title="Flag as needing further context or nuance"
+          >
+            <Flag className={`w-3.5 h-3.5 ${hasVotedContext ? 'text-amber-400 fill-amber-400/20' : 'text-slate-400'}`} />
+            <span>Needs Context</span>
+            <span className="font-mono bg-black/40 px-1.5 py-0.2 rounded text-[10px] text-amber-400 font-bold ml-0.5">
+              {contextCount}
+            </span>
           </button>
         </div>
       </div>

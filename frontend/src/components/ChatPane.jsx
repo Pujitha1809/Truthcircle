@@ -68,6 +68,8 @@ export default function ChatPane({
   onFactCheckMessage,
   onInspectCard,
   onTruthCircleVerify,
+  onVote,
+  votes = {},
   verifyingSteps = null,
   typingStatus = null,
   isSplitView = false
@@ -417,7 +419,10 @@ export default function ChatPane({
                 {msg.card && (
                   <CredibilityCard 
                     card={msg.card} 
-                    onInspect={onInspectCard} 
+                    onInspect={onInspectCard}
+                    onVote={onVote}
+                    currentUserId={currentUser.id}
+                    votes={votes}
                   />
                 )}
               </div>

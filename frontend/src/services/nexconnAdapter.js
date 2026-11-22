@@ -17,7 +17,8 @@ class NexconnAdapter {
     this.listeners = {
       message: new Set(),
       typing: new Set(),
-      status: new Set()
+      status: new Set(),
+      vote: new Set()
     };
 
     // Initialize cross-tab BroadcastChannel
@@ -81,6 +82,8 @@ class NexconnAdapter {
       this.listeners.message.forEach((fn) => fn(data.message));
     } else if (data.type === 'TYPING') {
       this.listeners.typing.forEach((fn) => fn(data));
+    } else if (data.type === 'CONSENSUS_VOTE') {
+      this.listeners.vote.forEach((fn) => fn(data));
     }
   }
 
@@ -96,6 +99,11 @@ class NexconnAdapter {
   onTyping(callback) {
     this.listeners.typing.add(callback);
     return () => this.listeners.typing.delete(callback);
+  }
+
+  onVote(callback) {
+    this.listeners.vote.add(callback);
+    return () => this.listeners.vote.delete(callback);
   }
 
   onStatusChange(callback) {
@@ -144,6 +152,23 @@ class NexconnAdapter {
         is_typing: isTyping
       });
     }
+  }
+
+  sendVote(votePayload) {
+    const payload = {
+      type: 'CONSENSUS_VOTE',
+      ...votePayload
+    };
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(payload));
+    }
+
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage(payload);
+    }
+
+    this.listeners.vote.forEach((fn) => fn(payload));
   }
 
   disconnect() {
