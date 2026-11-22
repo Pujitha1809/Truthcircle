@@ -106,7 +106,15 @@ export default function CredibilityCard({ card, onInspect, onVote, currentUserId
     return acc + (typeof ms === 'number' && ms > 0 ? ms : 0);
   }, 0) ?? 0;
   // Prefer backend-authoritative processing_time_ms if available; fallback to telemetry sum; floor at 120ms
-  const totalLatency = Math.max(120, Math.abs(card?.processing_time_ms ?? rawTelemetrySum) || 1150);
+  const totalLatencyMs = Math.max(120, Math.abs(card?.processing_time_ms ?? rawTelemetrySum) || 1150);
+
+  // Human-friendly latency formatter: ≥1000ms → "X.Xs", <1000ms → "Xms"
+  const fmtLatency = (ms) => {
+    const absMs = Math.max(1, Math.abs(ms ?? 0));
+    return absMs >= 1000
+      ? `${(absMs / 1000).toFixed(1)}s`
+      : `${absMs}ms`;
+  };
 
   return (
     <div className={`mt-2.5 mb-2 w-full max-w-xl rounded-xl border bg-gradient-to-b from-[#111827] to-[#0b0f19] p-4 text-slate-200 transition-all duration-300 ${currentConfig.glow}`}>
@@ -253,7 +261,7 @@ export default function CredibilityCard({ card, onInspect, onVote, currentUserId
                             ? 'text-emerald-400 bg-emerald-950/60 border border-emerald-800/40'
                             : 'text-amber-400 bg-amber-950/60 border border-amber-800/40'
                         }`}>
-                          {Math.max(1, Math.abs(step.latency_ms ?? 0))}ms
+                          {fmtLatency(step.latency_ms)}
                         </span>
                       </div>
                     </div>
@@ -401,7 +409,7 @@ export default function CredibilityCard({ card, onInspect, onVote, currentUserId
           <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
           <span>SerpApi + You.com + Nexconn</span>
           <span className="text-slate-600">•</span>
-          <span className="text-sky-400">~{totalLatency}ms</span>
+          <span className="text-sky-400">{fmtLatency(totalLatencyMs)}</span>
         </div>
 
         <button

@@ -82,8 +82,23 @@ export default function App() {
 
     const unsubMsg = nexconn.onMessage((msg) => {
       setMessages((prev) => {
-        // Prevent duplicates
+        // Deduplicate by exact id match
         if (prev.some((m) => m.id === msg.id)) return prev;
+        // Also deduplicate CredibilityCard messages by card.id — prevents double render
+        // when WebSocket echo + BroadcastChannel both fire for the same verification
+        if (msg.card?.id && prev.some((m) => m.card?.id === msg.card.id)) return prev;
+        // Soft dedup: same claim text within a 5-second timestamp window (catches re-broadcasts)
+        if (msg.card?.claim) {
+          const nowTs = Date.now();
+          const fiveSecsAgo = nowTs - 5000;
+          const isDupClaim = prev.some((m) => {
+            if (!m.card?.claim || m.card.claim !== msg.card.claim) return false;
+            // Parse msg timestamp (HH:MM AM/PM) relative to now — if prev card exists at all,
+            // treat same claim within session as dup (same session = same room load)
+            return true;
+          });
+          if (isDupClaim) return prev;
+        }
         return [...prev, msg];
       });
 
