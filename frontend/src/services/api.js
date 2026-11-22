@@ -29,6 +29,17 @@ export async function fetchPresets() {
   }
 }
 
+export async function fetchHistory() {
+  try {
+    const res = await fetch(`${API_BASE}/api/history`);
+    if (!res.ok) throw new Error('History fetch failed');
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] History fetch fallback:', err);
+    return [];
+  }
+}
+
 export async function fetchRooms() {
   try {
     const res = await fetch(`${API_BASE}/api/rooms`);

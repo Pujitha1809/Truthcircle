@@ -16,7 +16,8 @@ import {
 import DemoControlBar from './components/DemoControlBar';
 import ChatPane from './components/ChatPane';
 import EvidenceDrawer from './components/EvidenceDrawer';
-import { fetchHealth, fetchPresets, fetchRooms, fetchRoomMessages, verifyClaim } from './services/api';
+import RadarModal from './components/RadarModal';
+import { fetchHealth, fetchPresets, fetchRooms, fetchRoomMessages, verifyClaim, fetchHistory } from './services/api';
 import NexconnAdapter, { nexconn } from './services/nexconnAdapter';
 
 export default function App() {
@@ -24,10 +25,12 @@ export default function App() {
   const [activeRoomId, setActiveRoomId] = useState('family-circle');
   const [messages, setMessages] = useState([]);
   const [presets, setPresets] = useState([]);
+  const [history, setHistory] = useState([]);
   const [isSplitScreen, setIsSplitScreen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeCardForInspection, setActiveCardForInspection] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isRadarModalOpen, setIsRadarModalOpen] = useState(false);
   const [typingStatus, setTypingStatus] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -46,12 +49,16 @@ export default function App() {
   // Initial data loading
   useEffect(() => {
     async function init() {
-      const [fetchedRooms, fetchedPresets] = await Promise.all([
+      const [fetchedRooms, fetchedPresets, fetchedHistory] = await Promise.all([
         fetchRooms(),
-        fetchPresets()
+        fetchPresets(),
+        fetchHistory()
       ]);
       setRooms(fetchedRooms);
       setPresets(fetchedPresets);
+      if (fetchedHistory && fetchedHistory.length > 0) {
+        setHistory(fetchedHistory);
+      }
 
       const initMsgs = await fetchRoomMessages('family-circle');
       setMessages(initMsgs);
@@ -196,6 +203,21 @@ export default function App() {
         stopped: data.card.verdict === 'FALSE' || data.card.verdict === 'MISLEADING' ? prev.stopped + 1 : prev.stopped,
         avgSpeed: data.processing_time_ms || prev.avgSpeed
       }));
+      // Append to live history
+      setHistory(prev => [
+        {
+          id: data.card.id,
+          claim: data.card.claim,
+          verdict: data.card.verdict,
+          confidence_score: data.card.confidence_score,
+          source_type: data.card.source_type || sourceType,
+          extracted_ocr_text: data.card.extracted_ocr_text || extractedOcrText,
+          created_at: data.card.created_at || new Date().toISOString(),
+          primary_source: data.card.citations?.[0]?.domain || 'factcheck.in',
+          latency_ms: data.card.processing_time_ms || 420
+        },
+        ...prev
+      ]);
       setActiveCardForInspection(data.card);
       // Post the credibility card as a bot message in the chat stream
       const botMsg = {
@@ -296,6 +318,7 @@ export default function App() {
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         stats={stats}
         isLoading={isLoading}
+        onOpenRadarModal={() => setIsRadarModalOpen(true)}
       />
 
       {/* 2. Main Stage: Sidebar + Chat Panes */}
@@ -445,6 +468,15 @@ export default function App() {
         card={activeCardForInspection}
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
+      />
+
+      {/* 4. Enterprise Misinformation Radar & Compliance Audit Modal */}
+      <RadarModal
+        isOpen={isRadarModalOpen}
+        onClose={() => setIsRadarModalOpen(false)}
+        stats={stats}
+        history={history}
+        activeRoomId={activeRoomId}
       />
 
     </div>

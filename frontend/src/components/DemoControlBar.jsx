@@ -23,7 +23,8 @@ export default function DemoControlBar({
   isSidebarOpen = true,
   onToggleSidebar,
   stats = { checked: 14, stopped: 11, avgSpeed: 420 },
-  isLoading = false
+  isLoading = false,
+  onOpenRadarModal
 }) {
   const [customInput, setCustomInput] = useState('');
 
@@ -67,24 +68,32 @@ export default function DemoControlBar({
             </div>
           </div>
 
-          {/* Live Radar Counters */}
-          <div className="hidden xl:flex items-center gap-3 border-l border-slate-800 pl-4 font-mono text-xs">
-            <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-800">
+          {/* Live Radar Counters (Clickable for Enterprise Audit Modal) */}
+          <button 
+            type="button"
+            onClick={onOpenRadarModal}
+            className="hidden xl:flex items-center gap-2.5 border-l border-slate-800 pl-4 font-mono text-xs group cursor-pointer hover:opacity-95 transition-all text-left"
+            title="Click to view full Enterprise Misinformation Radar & Audit Log"
+          >
+            <div className="flex items-center gap-1.5 bg-slate-900/90 group-hover:border-emerald-500/50 px-2.5 py-1 rounded-md border border-slate-800 transition-colors shadow-sm">
               <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
               <span className="text-slate-400">Checked:</span>
               <span className="font-bold text-emerald-400">{stats.checked}</span>
             </div>
-            <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-800">
+            <div className="flex items-center gap-1.5 bg-slate-900/90 group-hover:border-red-500/50 px-2.5 py-1 rounded-md border border-slate-800 transition-colors shadow-sm">
               <Flame className="w-3.5 h-3.5 text-red-400" />
               <span className="text-slate-400">Stopped:</span>
               <span className="font-bold text-red-400">{stats.stopped}</span>
             </div>
-            <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-800">
+            <div className="flex items-center gap-1.5 bg-slate-900/90 group-hover:border-amber-500/50 px-2.5 py-1 rounded-md border border-slate-800 transition-colors shadow-sm">
               <Zap className="w-3.5 h-3.5 text-amber-400" />
               <span className="text-slate-400">Avg Speed:</span>
               <span className="font-bold text-amber-300">{stats.avgSpeed}ms</span>
             </div>
-          </div>
+            <span className="flex items-center gap-1 bg-emerald-950/70 text-emerald-400 border border-emerald-800/60 text-[10px] px-2 py-0.5 rounded-full font-bold group-hover:bg-emerald-900/80 transition-colors">
+              <span>📊 View Radar</span>
+            </span>
+          </button>
         </div>
 
         {/* Sponsor Badges & Split-Screen Toggle */}

@@ -212,6 +212,31 @@ async def get_presets():
     """Returns curated Indian viral rumor benchmarks for instant 1-click stage testing."""
     return cache_store.get_presets()
 
+@app.get("/api/history")
+async def get_verification_history():
+    """Returns full history of verified claims for the Enterprise Misinformation Radar."""
+    history = []
+    # Collect from persistent cache
+    for key, card in cache_store._cache.items():
+        if isinstance(card, CredibilityCard):
+            d = card.model_dump()
+        elif isinstance(card, dict):
+            d = card
+        else:
+            continue
+        history.append({
+            "id": d.get("id"),
+            "claim": d.get("claim"),
+            "verdict": d.get("verdict"),
+            "confidence_score": d.get("confidence_score", 95),
+            "source_type": d.get("source_type", "text"),
+            "extracted_ocr_text": d.get("extracted_ocr_text"),
+            "created_at": d.get("created_at") or datetime.now(timezone.utc).isoformat(),
+            "primary_source": d.get("citations", [{}])[0].get("domain") if d.get("citations") else "factcheck.in",
+            "latency_ms": d.get("processing_time_ms") or 420
+        })
+    return sorted(history, key=lambda x: x.get("created_at", ""), reverse=True)
+
 @app.get("/api/rooms")
 async def get_rooms():
     return list(ROOMS_CATALOG.values())
