@@ -18,7 +18,7 @@ import ChatPane from './components/ChatPane';
 import EvidenceDrawer from './components/EvidenceDrawer';
 import RadarModal from './components/RadarModal';
 import RoomLobby from './components/RoomLobby';
-import { fetchPresets, fetchHistory, createRoomWithCode, joinRoomWithCode } from './services/api';
+import { fetchHealth, fetchPresets, fetchHistory, fetchRooms, fetchRoomByCode, createRoomWithCode, joinRoomWithCode } from './services/api';
 import NexconnAdapter, { nexconn } from './services/nexconnAdapter';
 
 export default function App() {
@@ -26,6 +26,7 @@ export default function App() {
   const [activeRoomId, setActiveRoomId] = useState(null); // null = show lobby
   const [activeUserName, setActiveUserName] = useState('Rohan');
   const [phoneBUserName, setPhoneBUserName] = useState('Maa');
+  const [storageMode, setStorageMode] = useState('local_disk');
   const [lobbyError, setLobbyError] = useState(null);
   const [isLobbyLoading, setIsLobbyLoading] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -59,11 +60,17 @@ export default function App() {
   // Initial data loading
   useEffect(() => {
     async function init() {
-      const [fetchedPresets, fetchedHistory] = await Promise.all([
+      const [healthData, fetchedRooms, fetchedPresets, fetchedHistory] = await Promise.all([
+        fetchHealth(),
+        fetchRooms(),
         fetchPresets(),
         fetchHistory()
       ]);
-      setPresets(fetchedPresets);
+      if (healthData && healthData.storage_mode) {
+        setStorageMode(healthData.storage_mode);
+      }
+      setRooms(fetchedRooms || []);
+      setPresets(fetchedPresets || []);
       if (fetchedHistory && fetchedHistory.length > 0) {
         setHistory(fetchedHistory);
       }
@@ -207,7 +214,9 @@ export default function App() {
       setRooms(prev => prev.some(r => r.id === room.id) ? prev : [...prev, room]);
       setActiveUserName(userName);
       setActiveRoomId(room.invite_code);
-      setMessages([]);
+      // Load all existing room messages and cards from persistent storage
+      const roomData = await fetchRoomByCode(room.invite_code);
+      setMessages(roomData?.messages || []);
     } catch (err) {
       setLobbyError(`Room code "${inviteCode}" not found. Ask the group creator for the correct code.`);
     } finally {
@@ -218,7 +227,12 @@ export default function App() {
   // Switch Room
   const handleSelectRoom = async (roomId) => {
     setActiveRoomId(roomId);
-    setMessages([]);
+    try {
+      const roomData = await fetchRoomByCode(roomId);
+      setMessages(roomData?.messages || []);
+    } catch {
+      setMessages([]);
+    }
   };
 
   // Create New Group via sidebar — opens lobby in create tab overlay
@@ -447,6 +461,8 @@ export default function App() {
           onJoinRoom={handleLobbyJoin}
           error={lobbyError}
           isLoading={isLobbyLoading}
+          recentRooms={rooms}
+          storageMode={storageMode}
         />
       )}
 

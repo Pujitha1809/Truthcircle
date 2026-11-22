@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Plus, ArrowRight, KeyRound, Sparkles, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Plus, ArrowRight, KeyRound, Sparkles, AlertCircle, Clock, Database, HardDrive } from 'lucide-react';
 
-export default function RoomLobby({ onCreateRoom, onJoinRoom, error, isLoading }) {
+export default function RoomLobby({ onCreateRoom, onJoinRoom, error, isLoading, recentRooms = [], storageMode = 'local_disk' }) {
   const [activeTab, setActiveTab] = useState('create'); // 'create' | 'join'
   const [creatorName, setCreatorName] = useState('');
   const [groupName, setGroupName] = useState('');
@@ -26,6 +26,19 @@ export default function RoomLobby({ onCreateRoom, onJoinRoom, error, isLoading }
     });
   };
 
+  const handleQuickSelectRoom = (room) => {
+    const code = room.invite_code || room.id;
+    setInviteCode(code);
+    setActiveTab('join');
+    // If username is already filled, can submit immediately
+    if (joinUserName.trim()) {
+      onJoinRoom({
+        inviteCode: code.toUpperCase(),
+        userName: joinUserName.trim()
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen w-screen flex items-center justify-center bg-gradient-to-br from-[#070a12] via-[#0d121f] to-[#070a12] p-4 text-slate-100 font-sans">
       <div className="w-full max-w-md bg-[#111827]/90 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
@@ -48,7 +61,56 @@ export default function RoomLobby({ onCreateRoom, onJoinRoom, error, isLoading }
           <p className="text-xs text-slate-400 mt-1 max-w-xs">
             Real-Time Misinformation Firewall with Automatic Spam Detection & Deep Fact-Checking
           </p>
+
+          {/* Persistent Storage Badge */}
+          <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-400">
+            {storageMode === 'mongodb' ? (
+              <>
+                <Database className="w-3 h-3 text-emerald-400" />
+                <span className="text-emerald-400 font-semibold">MongoDB Atlas Connected</span>
+              </>
+            ) : (
+              <>
+                <HardDrive className="w-3 h-3 text-sky-400" />
+                <span className="text-sky-300 font-medium">Persistent Local Disk Storage</span>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* Recent Rooms Pills (survives restarts) */}
+        {recentRooms && recentRooms.length > 0 && (
+          <div className="mb-5 p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+            <div className="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-emerald-400">
+                <Clock className="w-3 h-3" /> Recent Active Rooms ({recentRooms.length})
+              </span>
+              <span className="text-[9px] text-slate-500 font-mono">1-Click Join</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+              {recentRooms.map((r) => {
+                const code = r.invite_code || r.id;
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => handleQuickSelectRoom(r)}
+                    className="group flex items-center gap-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500/50 px-2 py-1 rounded-lg text-xs transition-all active:scale-95"
+                    title={`Click to join ${r.name || r.group_name}`}
+                  >
+                    <span className="text-sm">{r.avatar || '💬'}</span>
+                    <span className="font-medium text-slate-200 group-hover:text-emerald-300 max-w-[120px] truncate text-[11px]">
+                      {r.name || r.group_name}
+                    </span>
+                    <span className="font-mono text-[10px] text-emerald-400 bg-emerald-950/80 border border-emerald-800/60 px-1 py-0.2 rounded font-bold">
+                      {code}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Tab Switcher: Create vs Join */}
         <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-800 mb-6 text-xs font-semibold">
@@ -112,7 +174,7 @@ export default function RoomLobby({ onCreateRoom, onJoinRoom, error, isLoading }
             </div>
 
             <p className="text-[11px] text-slate-500 italic">
-              Creating a group generates a unique 6-character code (e.g. <span className="font-mono text-emerald-400 font-semibold">TC-4829</span>) to invite friends or judges.
+              Creating a group generates a unique 6-character code (e.g. <span className="font-mono text-emerald-400 font-semibold">TC-4829</span>) saved to persistent storage.
             </p>
 
             <button
@@ -156,7 +218,7 @@ export default function RoomLobby({ onCreateRoom, onJoinRoom, error, isLoading }
             </div>
 
             <p className="text-[11px] text-slate-500 italic">
-              Enter the invite code shared by the group creator to join the live room session.
+              Enter the invite code shared by the group creator. All past messages, spam alerts, and cards will reload automatically.
             </p>
 
             <button

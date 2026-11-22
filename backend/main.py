@@ -2,7 +2,8 @@ import os
 import json
 import asyncio
 from datetime import datetime, timezone
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
+import random
 
 def _load_env_if_needed():
     candidates = [
@@ -45,11 +46,11 @@ from services.serp_service import serp_service
 from services.you_service import you_service
 from services.orchestrator import orchestrator
 from spam_detector import predict_spam
-import random
+from database import db
 
 app = FastAPI(
     title="TruthCircle Backend API",
-    description="Real-time multi-engine misinformation firewall for group chats powered by Nexconn, SerpApi, and You.com",
+    description="Real-time multi-engine misinformation firewall for group chats powered by Nexconn, SerpApi, You.com, and persistent MongoDB/Disk storage",
     version="1.0.0"
 )
 
@@ -61,7 +62,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory Room State & WebSocket Connection Manager
+# In-memory WebSocket Connection Manager
 class ConnectionManager:
     def __init__(self):
         # room_id -> Dict[user_id, WebSocket]
@@ -92,26 +93,55 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Dynamic rooms dictionary: indexed by invite_code (TC-XXXX)
-ROOMS_CATALOG: Dict[str, RoomInfo] = {}
+@app.on_event("startup")
+async def startup_event():
+    """Initializes async persistence layer (MongoDB with automatic local disk fallback)."""
+    mode = await db.initialize()
+    print(f"[TruthCircle] Server started in '{mode}' persistence mode.")
 
-# In-memory session message store — indexed by invite_code
-room_messages: Dict[str, List[dict]] = {}
+    # Backfill audit logs from cache presets if audit_logs is empty
+    logs = await db.get_audit_logs()
+    if not logs:
+        for key, card in cache_store._cache.items():
+            if isinstance(card, CredibilityCard):
+                d = card.model_dump()
+            elif isinstance(card, dict):
+                d = card
+            else:
+                continue
+            await db.save_audit_log({
+                "card_id": d.get("id"),
+                "invite_code": "GLOBAL",
+                "claim": d.get("claim"),
+                "verdict": d.get("verdict"),
+                "confidence_score": d.get("confidence_score", 95),
+                "source_type": d.get("source_type", "text"),
+                "extracted_ocr_text": d.get("extracted_ocr_text"),
+                "created_at": d.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "primary_source": d.get("citations", [{}])[0].get("domain") if d.get("citations") else "factcheck.in",
+                "latency_ms": d.get("processing_time_ms") or 420,
+                "verification_steps": d.get("verification_steps", [])
+            })
 
-def generate_invite_code() -> str:
+async def generate_invite_code() -> str:
+    all_rooms = await db.get_all_rooms()
+    existing_codes = {r.get("invite_code") for r in all_rooms if r.get("invite_code")}
     while True:
         digits = random.randint(1000, 9999)
         code = f"TC-{digits}"
-        if code not in ROOMS_CATALOG:
+        if code not in existing_codes:
             return code
 
 @app.get("/api/health")
 async def health_check():
+    db_status = db.get_status()
     return {
         "status": "healthy",
         "service": "TruthCircle Misinformation Firewall",
         "version": "1.0.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "storage_mode": db_status["storage_mode"],
+        "database": db_status,
         "sponsors": {
             "nexconn": {
                 "configured": bool(os.getenv("VITE_NEXCONN_APP_ID")),
@@ -142,72 +172,60 @@ async def get_presets():
 
 @app.get("/api/history")
 async def get_verification_history():
-    """Returns full history of verified claims for the Enterprise Misinformation Radar."""
-    history = []
-    # Collect from persistent cache
-    for key, card in cache_store._cache.items():
-        if isinstance(card, CredibilityCard):
-            d = card.model_dump()
-        elif isinstance(card, dict):
-            d = card
-        else:
-            continue
-        history.append({
-            "id": d.get("id"),
-            "claim": d.get("claim"),
-            "verdict": d.get("verdict"),
-            "confidence_score": d.get("confidence_score", 95),
-            "source_type": d.get("source_type", "text"),
-            "extracted_ocr_text": d.get("extracted_ocr_text"),
-            "created_at": d.get("created_at") or datetime.now(timezone.utc).isoformat(),
-            "primary_source": d.get("citations", [{}])[0].get("domain") if d.get("citations") else "factcheck.in",
-            "latency_ms": d.get("processing_time_ms") or 420
-        })
-    return sorted(history, key=lambda x: x.get("created_at", ""), reverse=True)
+    """Returns full history of verified claims for the Enterprise Misinformation Radar from persistent storage."""
+    logs = await db.get_audit_logs(limit=200)
+    return logs
 
 @app.get("/api/rooms")
 async def get_rooms():
-    return list(ROOMS_CATALOG.values())
+    """Returns all dynamically created rooms from persistent storage."""
+    return await db.get_all_rooms()
 
 @app.post("/api/rooms/create")
 async def create_room_with_code(req: CreateRoomRequest):
-    """Creates a new dynamic group room with a unique 6-character invite code (TC-XXXX)."""
-    code = generate_invite_code()
+    """Creates a new dynamic group room with a unique 6-character invite code (TC-XXXX) in persistent storage."""
+    code = await generate_invite_code()
     members = [req.creator_name.strip(), "TruthCircle Bot"]
-    room = RoomInfo(
-        id=code,
-        name=req.group_name.strip(),
-        description=f"Created by {req.creator_name} • Code: {code}",
-        invite_code=code,
-        unread_count=0,
-        avatar="💬",
-        members=members,
-        is_protected=True
-    )
-    ROOMS_CATALOG[code] = room
-    room_messages[code] = []
-    return room
+    room_data = {
+        "id": code,
+        "name": req.group_name.strip(),
+        "group_name": req.group_name.strip(),
+        "creator_name": req.creator_name.strip(),
+        "description": f"Created by {req.creator_name.strip()} • Code: {code}",
+        "invite_code": code,
+        "unread_count": 0,
+        "avatar": "💬",
+        "members": members,
+        "is_protected": True
+    }
+    return await db.create_room(room_data)
+
+@app.post("/api/rooms")
+async def create_room_generic(room_data: dict):
+    """Legacy or direct room creation handler."""
+    code = room_data.get("invite_code") or room_data.get("id")
+    if not code or not code.startswith("TC-"):
+        code = await generate_invite_code()
+    room_data["id"] = code
+    room_data["invite_code"] = code
+    return await db.create_room(room_data)
 
 @app.post("/api/rooms/join")
 async def join_room_with_code(req: JoinRoomRequest):
-    """Validates unique invite code and adds user to the room."""
+    """Validates unique invite code and adds user to the persistent room."""
     code = req.invite_code.strip().upper()
-    if code not in ROOMS_CATALOG:
-        # Check case-insensitive match
-        matched_code = next((k for k in ROOMS_CATALOG.keys() if k.upper() == code), None)
-        if not matched_code:
-            raise HTTPException(status_code=404, detail=f"Room with code '{code}' not found")
-        code = matched_code
+    room = await db.get_room(code)
+    if not room:
+        raise HTTPException(status_code=404, detail=f"Room with code '{code}' not found")
 
-    room = ROOMS_CATALOG[code]
     uname = req.user_name.strip()
-    if uname and uname not in room.members:
-        room.members.append(uname)
+    updated_room = await db.add_room_member(code, uname)
 
-    # Broadcast USER_JOINED system notice to WebSocket
+    # Broadcast USER_JOINED system notice to WebSocket and persist it
     join_msg = {
-        "id": f"msg-sys-{Date_now_ms() if 'Date_now_ms' in locals() else datetime.now().timestamp()}",
+        "id": f"msg-sys-{int(datetime.now().timestamp() * 1000)}",
         "room_id": code,
+        "invite_code": code,
         "sender_id": "truthcircle-bot",
         "sender_name": "TruthCircle AI",
         "sender_avatar": "🛡️",
@@ -216,44 +234,41 @@ async def join_room_with_code(req: JoinRoomRequest):
         "is_forwarded": False,
         "card": None
     }
-    if code in room_messages:
-        room_messages[code].append(join_msg)
+    await db.save_message(code, join_msg)
     await manager.broadcast_to_room(code, {
         "type": "NEW_MESSAGE",
         "message": join_msg
     })
 
-    return room
+    return updated_room or room
 
 @app.get("/api/rooms/{invite_code}")
 async def get_room_by_code(invite_code: str):
+    """Returns room metadata and all persistent chat messages."""
     code = invite_code.strip().upper()
-    matched_code = next((k for k in ROOMS_CATALOG.keys() if k.upper() == code), None)
-    if not matched_code:
+    room = await db.get_room(code)
+    if not room:
         raise HTTPException(status_code=404, detail="Room not found")
+    messages = await db.get_messages(code)
     return {
-        "room": ROOMS_CATALOG[matched_code],
-        "messages": room_messages.get(matched_code, [])
+        "room": room,
+        "messages": messages
     }
 
 @app.get("/api/rooms/{room_id}/messages")
 async def get_room_messages(room_id: str):
-    code = room_id.strip().upper()
-    matched = next((k for k in room_messages.keys() if k.upper() == code), None)
-    if matched:
-        return room_messages[matched]
-    if room_id in room_messages:
-        return room_messages[room_id]
-    return []
+    """Returns all persistent messages for a given room."""
+    return await db.get_messages(room_id)
 
 @app.post("/api/verify", response_model=VerifyResponse)
 async def verify_claim(req: VerifyRequest):
     """
     Core Fact-Checking Pipeline:
-    1. Checks cache for <80ms return
+    1. Checks cache for fast return
     2. Runs SerpApi News + Hunter + Extract (MD)
     3. Runs You.com Cited Research & RAG
-    4. Posts Credibility Card into room via WebSocket broadcast
+    4. Persists Credibility Card & Audit Log to MongoDB/Disk
+    5. Posts Credibility Card into room via WebSocket broadcast
     """
     res = await orchestrator.verify(
         claim=req.claim,
@@ -263,23 +278,43 @@ async def verify_claim(req: VerifyRequest):
         extracted_ocr_text=req.extracted_ocr_text
     )
 
-    # Post Credibility Card directly into the room's stream
     room_id = req.room_id or "family-circle"
     card_msg = {
         "id": f"msg-card-{res.card.id}",
         "room_id": room_id,
+        "invite_code": room_id,
         "sender_id": "truthcircle-bot",
         "sender_name": "TruthCircle AI",
         "sender_avatar": "🛡️",
         "text": f"Fact-Check Result for claim: \"{req.claim[:80]}...\"",
         "timestamp": datetime.now().strftime("%I:%M %p"),
         "is_forwarded": False,
-        "card": res.card.model_dump()
+        "card": res.card.model_dump(),
+        "helpful_votes": ["initial-reviewer"],
+        "context_votes": []
     }
 
-    if room_id not in room_messages:
-        room_messages[room_id] = []
-    room_messages[room_id].append(card_msg)
+    # Persist card message in room history
+    await db.save_message(room_id, card_msg)
+
+    # Persist audit record in audit_logs collection
+    primary_src = res.card.citations[0].domain if res.card.citations else "factcheck.in"
+    await db.save_audit_log({
+        "card_id": res.card.id,
+        "id": res.card.id,
+        "invite_code": room_id,
+        "claim": res.card.claim,
+        "verdict": res.card.verdict,
+        "confidence_score": res.card.confidence_score,
+        "source_type": res.card.source_type or req.source_type or "text",
+        "extracted_ocr_text": res.card.extracted_ocr_text or req.extracted_ocr_text,
+        "primary_source": primary_src,
+        "primary_sources": [c.domain for c in res.card.citations],
+        "latency_ms": res.card.processing_time_ms or res.processing_time_ms,
+        "processing_time_ms": res.card.processing_time_ms or res.processing_time_ms,
+        "verification_steps": res.card.verification_steps or [],
+        "created_at": res.card.created_at or datetime.now(timezone.utc).isoformat()
+    })
 
     # Broadcast to all connected clients in the room
     await manager.broadcast_to_room(room_id, {
@@ -297,7 +332,6 @@ async def nexconn_webhook(payload: dict):
     
     if event_type == "message.created":
         text = payload.get("message", {}).get("text", "")
-        # Automatic triggering when user tags @truthcircle or forwards suspicious content
         if "@truthcircle" in text.lower():
             claim = text.lower().replace("@truthcircle", "").strip()
             if claim:
@@ -309,11 +343,12 @@ async def nexconn_webhook(payload: dict):
 async def websocket_endpoint(websocket: WebSocket, room_id: str, user_id: str):
     await manager.connect(room_id, user_id, websocket)
     try:
-        # Send room connection welcome
+        # Send room connection welcome with storage mode
         await websocket.send_json({
             "type": "CONNECTED",
             "room_id": room_id,
             "user_id": user_id,
+            "storage_mode": db.storage_mode,
             "timestamp": datetime.now().strftime("%I:%M %p")
         })
 
@@ -322,19 +357,20 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, user_id: str):
             try:
                 payload = json.loads(data)
                 action = payload.get("action")
+                event_type = payload.get("type")
 
                 if action == "SEND_MESSAGE":
                     msg_data = payload.get("message", {})
                     text = msg_data.get("text", "")
                     
                     # ─── Real-Time Spam & Scam Prediction (<15ms) ───────────
-                    # Run deterministic + heuristic analysis on every incoming message
                     spam_result = predict_spam(text)
                     msg_data["spam_prediction"] = spam_result
+                    msg_data["room_id"] = room_id
+                    msg_data["invite_code"] = room_id
 
-                    if room_id not in room_messages:
-                        room_messages[room_id] = []
-                    room_messages[room_id].append(msg_data)
+                    # Save message to persistent storage (survives reboots)
+                    await db.save_message(room_id, msg_data)
 
                     # Broadcast the user message with spam prediction to everyone in the room
                     await manager.broadcast_to_room(room_id, {
@@ -342,12 +378,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, user_id: str):
                         "message": msg_data
                     })
 
-                    # Automatic fact-check trigger on @truthcircle or URL or forwarded check
-                    text = msg_data.get("text", "")
+                    # Automatic fact-check trigger on @truthcircle
                     if "@truthcircle" in text.lower():
                         claim = text.replace("@truthcircle", "").replace("@TruthCircle", "").strip()
                         if claim:
-                            # Run fact-check in background task
                             async def run_fc():
                                 # Broadcast bot typing status
                                 await manager.broadcast_to_room(room_id, {
@@ -359,15 +393,38 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, user_id: str):
                                 card_msg = {
                                     "id": f"msg-card-{res.card.id}",
                                     "room_id": room_id,
+                                    "invite_code": room_id,
                                     "sender_id": "truthcircle-bot",
                                     "sender_name": "TruthCircle AI",
                                     "sender_avatar": "🛡️",
                                     "text": f"🛡️ Fact-Check Investigation for: \"{claim[:75]}...\"",
                                     "timestamp": datetime.now().strftime("%I:%M %p"),
                                     "is_forwarded": False,
-                                    "card": res.card.model_dump()
+                                    "card": res.card.model_dump(),
+                                    "helpful_votes": ["initial-reviewer"],
+                                    "context_votes": []
                                 }
-                                room_messages[room_id].append(card_msg)
+
+                                # Persist both the card message and the audit log
+                                await db.save_message(room_id, card_msg)
+                                primary_src = res.card.citations[0].domain if res.card.citations else "factcheck.in"
+                                await db.save_audit_log({
+                                    "card_id": res.card.id,
+                                    "id": res.card.id,
+                                    "invite_code": room_id,
+                                    "claim": res.card.claim,
+                                    "verdict": res.card.verdict,
+                                    "confidence_score": res.card.confidence_score,
+                                    "source_type": res.card.source_type or "text",
+                                    "extracted_ocr_text": res.card.extracted_ocr_text,
+                                    "primary_source": primary_src,
+                                    "primary_sources": [c.domain for c in res.card.citations],
+                                    "latency_ms": res.card.processing_time_ms or 420,
+                                    "processing_time_ms": res.card.processing_time_ms or 420,
+                                    "verification_steps": res.card.verification_steps or [],
+                                    "created_at": res.card.created_at or datetime.now(timezone.utc).isoformat()
+                                })
+
                                 await manager.broadcast_to_room(room_id, {
                                     "type": "TYPING",
                                     "sender_name": "TruthCircle AI",
@@ -379,6 +436,22 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, user_id: str):
                                 })
 
                             asyncio.create_task(run_fc())
+
+                elif action == "CONSENSUS_VOTE" or event_type == "CONSENSUS_VOTE":
+                    card_id = payload.get("card_id")
+                    voter_id = payload.get("user_id", user_id)
+                    vote_type = payload.get("vote_type")
+                    if card_id and vote_type:
+                        # Update consensus votes in persistent storage
+                        votes = await db.update_consensus_vote(card_id, voter_id, vote_type, room_id)
+                        await manager.broadcast_to_room(room_id, {
+                            "type": "CONSENSUS_VOTE",
+                            "card_id": card_id,
+                            "user_id": voter_id,
+                            "vote_type": vote_type,
+                            "room_id": room_id,
+                            "votes": votes
+                        })
 
                 elif action == "TYPING":
                     await manager.broadcast_to_room(room_id, {
@@ -396,4 +469,3 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, user_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
-

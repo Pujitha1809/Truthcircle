@@ -47,16 +47,7 @@ export async function fetchRooms() {
     return await res.json();
   } catch (err) {
     console.warn('[API] Rooms fallback:', err);
-    return [
-      {
-        id: 'family-circle',
-        name: 'Family Circle 🇮🇳',
-        description: 'Sharma Family & Relatives • TruthCircle Protected',
-        unread_count: 2,
-        avatar: '👨‍👩‍👧‍👦',
-        members: ['Maa', 'Rohan', 'Uncle Vijay', 'TruthCircle Bot']
-      }
-    ];
+    return [];
   }
 }
 
